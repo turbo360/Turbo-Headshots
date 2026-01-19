@@ -194,7 +194,7 @@ ipcMain.handle('select-output-folder', async () => {
     
     // Create CSV if it doesn't exist
     if (!fs.existsSync(sessionsFile)) {
-      fs.writeFileSync(sessionsFile, 'timestamp,first_name,last_name,email,company,original_file,new_file\n');
+      fs.writeFileSync(sessionsFile, 'timestamp,first_name,last_name,email,company,original_filename,new_filename,original_path,new_path\n');
     }
     
     saveSettings();
@@ -234,7 +234,8 @@ ipcMain.handle('save-session', async (event, data) => {
     fs.copyFileSync(originalFile, newFilePath);
     
     // Append to CSV
-    const csvLine = `"${new Date().toISOString()}","${firstName}","${lastName}","${email}","${company || ''}","${originalFile}","${newFilePath}"\n`;
+    const originalFileName = path.basename(originalFile);
+    const csvLine = `"${new Date().toISOString()}","${firstName}","${lastName}","${email}","${company || ''}","${originalFileName}","${newFileName}","${originalFile}","${newFilePath}"\n`;
     fs.appendFileSync(sessionsFile, csvLine);
     
     return { success: true, newPath: newFilePath, personFolder };
