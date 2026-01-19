@@ -1,0 +1,66 @@
+{
+  "name": "turbo-headshots",
+  "version": "1.0.0",
+  "description": "Headshot registration system for tethered photography",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac",
+    "build-dmg": "electron-builder --mac dmg"
+  },
+  "author": "Turbo 360",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "@electron/notarize": "^2.2.1"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3"
+  },
+  "build": {
+    "appId": "com.turbo360.headshots",
+    "productName": "Turbo Headshots",
+    "mac": {
+      "category": "public.app-category.photography",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        }
+      ],
+      "identity": "James Anderson (ETURVK9WSA)",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Turbo Headshots",
+      "sign": false,
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "afterSign": "notarize.js",
+    "files": [
+      "**/*",
+      "!*.md"
+    ],
+    "extraResources": [
+      {
+        "from": "logo.png",
+        "to": "logo.png"
+      }
+    ]
+  }
+}

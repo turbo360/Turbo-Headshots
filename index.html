@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Turbo Headshots</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      min-height: 100vh;
+      padding: 20px;
+      padding-top: 50px;
+    }
+    
+    .container { max-width: 900px; margin: 0 auto; }
+    
+    header { text-align: center; margin-bottom: 30px; }
+    header .logo { height: 60px; margin-bottom: 10px; }
+    header h1 { font-size: 1.8em; font-weight: 400; margin-bottom: 5px; color: #fff; }
+    header p { color: #a0a0a0; font-size: 0.9em; }
+    
+    .status-bar {
+      display: flex; gap: 20px; margin-bottom: 30px; padding: 15px;
+      background: rgba(255,255,255,0.05); border-radius: 12px;
+    }
+    
+    .status-item {
+      flex: 1; cursor: pointer; padding: 10px; border-radius: 8px; transition: background 0.2s;
+    }
+    .status-item:hover { background: rgba(255,255,255,0.1); }
+    .status-item label { font-size: 0.8em; color: #888; display: block; margin-bottom: 5px; }
+    .status-item .value { font-size: 0.9em; word-break: break-all; }
+    .status-item .value.not-set { color: #ff6b6b; }
+    .status-item .value.set { color: #51cf66; }
+    
+    .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+    
+    .card { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 25px; }
+    .card h2 { font-size: 1.2em; font-weight: 500; margin-bottom: 20px; color: #ccc; }
+    
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; font-size: 0.85em; color: #aaa; margin-bottom: 8px; }
+    .form-group input {
+      width: 100%; padding: 12px 15px; border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px; background: rgba(0,0,0,0.3); color: #fff; font-size: 1em; transition: border-color 0.2s;
+    }
+    .form-group input:focus { outline: none; border-color: #c83232; }
+    .form-group input::placeholder { color: #666; }
+    
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 14px 28px; border: none; border-radius: 10px; font-size: 1em;
+      font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%;
+    }
+    .btn-primary { background: linear-gradient(135deg, #c83232 0%, #a02828 100%); color: #fff; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(200, 50, 50, 0.3); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-success { background: linear-gradient(135deg, #51cf66 0%, #40c057 100%); color: #fff; }
+    .btn-success:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(81, 207, 102, 0.3); }
+    
+    .preview-area {
+      height: 300px; background: rgba(0,0,0,0.3); border-radius: 12px;
+      display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;
+    }
+    .preview-area img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .preview-area .placeholder { text-align: center; color: #666; }
+    .preview-area .placeholder .icon { font-size: 3em; margin-bottom: 15px; opacity: 0.5; }
+    
+    .toast {
+      position: fixed; bottom: 30px; right: 30px; padding: 15px 25px;
+      background: #51cf66; color: #fff; border-radius: 10px; font-weight: 500;
+      transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 1000;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.error { background: #ff6b6b; }
+    
+    .recent-sessions { margin-top: 30px; }
+    .recent-sessions h3 { font-size: 1.1em; margin-bottom: 15px; color: #aaa; }
+    
+    .session-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 15px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+    }
+    .session-item:hover { background: rgba(255,255,255,0.1); }
+    .session-item .name { font-weight: 500; }
+    .session-item .email { font-size: 0.85em; color: #888; }
+    .session-item .count { background: rgba(200, 50, 50, 0.2); color: #e85555; padding: 4px 10px; border-radius: 20px; font-size: 0.8em; }
+    
+    .empty-state { text-align: center; padding: 40px; color: #666; }
+    
+    .photo-counter {
+      text-align: center; margin-top: 15px; padding: 15px;
+      background: rgba(81, 207, 102, 0.2); border-radius: 8px; color: #51cf66;
+      font-size: 1.2em; font-weight: 500;
+    }
+    
+    .active-session {
+      background: rgba(81, 207, 102, 0.1); border: 2px solid rgba(81, 207, 102, 0.3);
+      border-radius: 12px; padding: 15px; margin-bottom: 20px; text-align: center;
+    }
+    .active-session .name { font-size: 1.3em; font-weight: 600; color: #51cf66; }
+    .active-session .status { font-size: 0.9em; color: #aaa; margin-top: 5px; }
+    
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    .recording { animation: pulse 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="logo.png" alt="Turbo 360" class="logo">
+      <h1>Turbo Headshots</h1>
+      <p>Register details, then take photos with LUMIX Tether</p>
+    </header>
+    
+    <div class="status-bar">
+      <div class="status-item" onclick="selectWatchFolder()">
+        <label>Watch Folder (LUMIX Tether Output)</label>
+        <div class="value" id="watchFolderStatus">Click to set...</div>
+      </div>
+      <div class="status-item" onclick="selectOutputFolder()">
+        <label>Output Folder (Organized Headshots)</label>
+        <div class="value" id="outputFolderStatus">Click to set...</div>
+      </div>
+    </div>
+    
+    <div class="main-content">
+      <!-- Registration Form -->
+      <div class="card">
+        <h2>Registration</h2>
+        
+        <!-- Active Session Display -->
+        <div class="active-session" id="activeSession" style="display: none;">
+          <div class="name" id="activeSessionName"></div>
+          <div class="status recording">Session Active - Take photos now</div>
+        </div>
+        
+        <div id="formFields">
+          <div class="form-group">
+            <label>First Name *</label>
+            <input type="text" id="firstName" placeholder="John" autofocus>
+          </div>
+          
+          <div class="form-group">
+            <label>Last Name *</label>
+            <input type="text" id="lastName" placeholder="Smith">
+          </div>
+          
+          <div class="form-group">
+            <label>Email *</label>
+            <input type="email" id="email" placeholder="john@company.com">
+          </div>
+          
+          <div class="form-group">
+            <label>Company</label>
+            <input type="text" id="company" placeholder="Acme Inc">
+          </div>
+        </div>
+        
+        <button class="btn btn-primary" id="startBtn" onclick="startSession()" disabled>
+          Start Session
+        </button>
+        
+        <button class="btn btn-success" id="endBtn" onclick="endSession()" style="display: none;">
+          End Session - Next Person
+        </button>
+        
+        <div class="photo-counter" id="photoCounter" style="display: none;">
+          <span id="photoCount">0</span> photo(s) saved
+        </div>
+      </div>
+      
+      <!-- Preview -->
+      <div class="card">
+        <h2>Latest Photo</h2>
+        
+        <div class="preview-area" id="previewArea">
+          <div class="placeholder">
+            <div class="icon">📷</div>
+            <p>Waiting for image...</p>
+            <p style="font-size: 0.85em; margin-top: 5px;">Take a photo in LUMIX Tether</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Recent Sessions -->
+    <div class="recent-sessions">
+      <h3>Recent Sessions</h3>
+      <div id="recentList">
+        <div class="empty-state">No sessions yet today</div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="toast" id="toast"></div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    const path = require('path');
+    
+    let currentPerson = null;
+    let isSessionActive = false;
+    let sessionPhotoCount = 0;
+    let recentSessions = [];
+    let currentPersonFolder = '';
+    
+    async function init() {
+      const settings = await ipcRenderer.invoke('get-settings');
+      updateFolderStatus(settings);
+    }
+    
+    function updateFolderStatus(settings) {
+      const watchEl = document.getElementById('watchFolderStatus');
+      const outputEl = document.getElementById('outputFolderStatus');
+      
+      if (settings.watchFolder) {
+        watchEl.textContent = settings.watchFolder;
+        watchEl.className = 'value set';
+      } else {
+        watchEl.textContent = 'Click to set...';
+        watchEl.className = 'value not-set';
+      }
+      
+      if (settings.outputFolder) {
+        outputEl.textContent = settings.outputFolder;
+        outputEl.className = 'value set';
+      } else {
+        outputEl.textContent = 'Click to set...';
+        outputEl.className = 'value not-set';
+      }
+      
+      checkStartButton();
+    }
+    
+    async function selectWatchFolder() {
+      const folder = await ipcRenderer.invoke('select-watch-folder');
+      if (folder) {
+        document.getElementById('watchFolderStatus').textContent = folder;
+        document.getElementById('watchFolderStatus').className = 'value set';
+        checkStartButton();
+        showToast('Watch folder set!');
+      }
+    }
+    
+    async function selectOutputFolder() {
+      const folder = await ipcRenderer.invoke('select-output-folder');
+      if (folder) {
+        document.getElementById('outputFolderStatus').textContent = folder;
+        document.getElementById('outputFolderStatus').className = 'value set';
+        checkStartButton();
+        showToast('Output folder set!');
+      }
+    }
+    
+    function checkStartButton() {
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName = document.getElementById('lastName').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const watchSet = document.getElementById('watchFolderStatus').classList.contains('set');
+      const outputSet = document.getElementById('outputFolderStatus').classList.contains('set');
+      
+      document.getElementById('startBtn').disabled = !(firstName && lastName && email && watchSet && outputSet);
+    }
+    
+    function startSession() {
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName = document.getElementById('lastName').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const company = document.getElementById('company').value.trim();
+      
+      currentPerson = { firstName, lastName, email, company };
+      isSessionActive = true;
+      sessionPhotoCount = 0;
+      currentPersonFolder = '';
+      
+      document.getElementById('formFields').style.display = 'none';
+      document.getElementById('startBtn').style.display = 'none';
+      document.getElementById('endBtn').style.display = 'block';
+      document.getElementById('photoCounter').style.display = 'block';
+      document.getElementById('photoCount').textContent = '0';
+      
+      document.getElementById('activeSession').style.display = 'block';
+      document.getElementById('activeSessionName').textContent = `${firstName} ${lastName}`;
+      
+      showToast(`Session started for ${firstName} ${lastName}`);
+    }
+    
+    function endSession() {
+      if (currentPerson && sessionPhotoCount > 0) {
+        recentSessions.unshift({
+          ...currentPerson,
+          timestamp: new Date(),
+          photoCount: sessionPhotoCount,
+          folder: currentPersonFolder
+        });
+        updateRecentList();
+      }
+      
+      currentPerson = null;
+      isSessionActive = false;
+      sessionPhotoCount = 0;
+      currentPersonFolder = '';
+      
+      document.getElementById('firstName').value = '';
+      document.getElementById('lastName').value = '';
+      document.getElementById('email').value = '';
+      document.getElementById('company').value = '';
+      
+      document.getElementById('formFields').style.display = 'block';
+      document.getElementById('startBtn').style.display = 'block';
+      document.getElementById('endBtn').style.display = 'none';
+      document.getElementById('photoCounter').style.display = 'none';
+      document.getElementById('activeSession').style.display = 'none';
+      
+      document.getElementById('previewArea').innerHTML = `
+        <div class="placeholder">
+          <div class="icon">📷</div>
+          <p>Waiting for image...</p>
+          <p style="font-size: 0.85em; margin-top: 5px;">Take a photo in LUMIX Tether</p>
+        </div>
+      `;
+      
+      document.getElementById('firstName').focus();
+      checkStartButton();
+      showToast('Session ended. Ready for next person!');
+    }
+    
+    // Listen for new images - only show JPEG previews
+    ipcRenderer.on('new-image', async (event, filePath) => {
+      console.log('New image detected:', filePath);
+      
+      const ext = path.extname(filePath).toLowerCase();
+      const isJpeg = ['.jpg', '.jpeg'].includes(ext);
+      
+      // Only show preview for JPEGs
+      if (isJpeg) {
+        const previewArea = document.getElementById('previewArea');
+        previewArea.innerHTML = `<img src="file://${filePath}?t=${Date.now()}" alt="Preview">`;
+      }
+      
+      // If session is active, save the file (both RAW and JPEG)
+      if (isSessionActive && currentPerson) {
+        const result = await ipcRenderer.invoke('save-session', {
+          ...currentPerson,
+          originalFile: filePath
+        });
+        
+        if (result.success) {
+          sessionPhotoCount++;
+          currentPersonFolder = result.personFolder;
+          document.getElementById('photoCount').textContent = sessionPhotoCount;
+          showToast(`Photo ${sessionPhotoCount} saved for ${currentPerson.firstName}`);
+        } else {
+          showToast('Error saving: ' + result.error, true);
+        }
+      } else if (!isSessionActive) {
+        showToast('Start a session first to save photos', true);
+      }
+    });
+    
+    function updateRecentList() {
+      const list = document.getElementById('recentList');
+      
+      if (recentSessions.length === 0) {
+        list.innerHTML = '<div class="empty-state">No sessions yet today</div>';
+        return;
+      }
+      
+      list.innerHTML = recentSessions.slice(0, 10).map(s => `
+        <div class="session-item" onclick="openFolder('${s.folder.replace(/'/g, "\\'")}')">
+          <div>
+            <div class="name">${s.firstName} ${s.lastName}</div>
+            <div class="email">${s.email}</div>
+          </div>
+          <div class="count">${s.photoCount} photo(s)</div>
+        </div>
+      `).join('');
+    }
+    
+    function openFolder(folderPath) {
+      if (folderPath) {
+        ipcRenderer.invoke('open-folder', folderPath);
+      }
+    }
+    
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast show' + (isError ? ' error' : '');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+    
+    // Form listeners
+    document.querySelectorAll('#formFields input').forEach(input => {
+      input.addEventListener('input', checkStartButton);
+    });
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !document.getElementById('startBtn').disabled && !isSessionActive) {
+        startSession();
+      }
+      if (e.key === 'Escape' && isSessionActive) {
+        endSession();
+      }
+    });
+    
+    init();
+  </script>
+</body>
+</html>
