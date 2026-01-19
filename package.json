@@ -1,6 +1,6 @@
 {
   "name": "turbo-headshots",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Headshot registration system for tethered photography",
   "main": "main.js",
   "scripts": {
@@ -11,12 +11,13 @@
   "author": "Turbo 360",
   "license": "MIT",
   "devDependencies": {
+    "@electron/notarize": "^2.2.1",
     "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
-    "@electron/notarize": "^2.2.1"
+    "electron-builder": "^24.9.1"
   },
   "dependencies": {
-    "chokidar": "^3.5.3"
+    "chokidar": "^3.5.3",
+    "electron-updater": "^6.7.3"
   },
   "build": {
     "appId": "com.turbo360.headshots",
@@ -26,7 +27,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
         }
       ],
       "identity": "James Anderson (ETURVK9WSA)",
@@ -61,6 +70,11 @@
         "from": "logo.png",
         "to": "logo.png"
       }
-    ]
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "turbo360",
+      "repo": "Turbo-Headshots"
+    }
   }
 }

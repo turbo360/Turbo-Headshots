@@ -107,6 +107,34 @@
     
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
     .recording { animation: pulse 1.5s ease-in-out infinite; }
+
+    /* Update Banner */
+    .update-banner {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
+      background: linear-gradient(135deg, #4a69bd 0%, #6a89cc 100%);
+      padding: 12px 20px; display: none; align-items: center; justify-content: center; gap: 15px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .update-banner.show { display: flex; }
+    .update-banner .message { font-size: 0.95em; font-weight: 500; }
+    .update-banner .version { background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 12px; font-size: 0.85em; }
+    .update-banner .btn-update {
+      background: #fff; color: #4a69bd; border: none; padding: 8px 18px;
+      border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9em; transition: all 0.2s;
+    }
+    .update-banner .btn-update:hover { transform: scale(1.05); }
+    .update-banner .btn-dismiss {
+      background: transparent; border: 1px solid rgba(255,255,255,0.4); color: #fff;
+      padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85em;
+    }
+    .update-banner .btn-dismiss:hover { background: rgba(255,255,255,0.1); }
+    .update-banner .progress-bar {
+      width: 200px; height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; overflow: hidden;
+    }
+    .update-banner .progress-bar .fill {
+      height: 100%; background: #fff; transition: width 0.3s; width: 0%;
+    }
+    .version-display { position: fixed; bottom: 10px; right: 15px; font-size: 0.75em; color: #555; }
   </style>
 </head>
 <body>
@@ -198,7 +226,20 @@
   </div>
   
   <div class="toast" id="toast"></div>
-  
+
+  <!-- Update Banner -->
+  <div class="update-banner" id="updateBanner">
+    <span class="message" id="updateMessage">A new version is available!</span>
+    <span class="version" id="updateVersion"></span>
+    <div class="progress-bar" id="updateProgress" style="display: none;">
+      <div class="fill" id="updateProgressFill"></div>
+    </div>
+    <button class="btn-update" id="updateBtn" onclick="handleUpdateAction()">Download</button>
+    <button class="btn-dismiss" onclick="dismissUpdate()">Later</button>
+  </div>
+
+  <div class="version-display" id="versionDisplay"></div>
+
   <script>
     const { ipcRenderer } = require('electron');
     const path = require('path');
@@ -410,6 +451,76 @@
       }
     });
     
+    // Auto-update handling
+    let updateState = 'idle'; // idle, available, downloading, downloaded
+
+    ipcRenderer.on('update-status', (event, data) => {
+      const banner = document.getElementById('updateBanner');
+      const message = document.getElementById('updateMessage');
+      const version = document.getElementById('updateVersion');
+      const btn = document.getElementById('updateBtn');
+      const progress = document.getElementById('updateProgress');
+      const progressFill = document.getElementById('updateProgressFill');
+
+      switch (data.status) {
+        case 'available':
+          updateState = 'available';
+          message.textContent = 'A new version is available!';
+          version.textContent = `v${data.version}`;
+          version.style.display = 'inline';
+          btn.textContent = 'Download';
+          btn.style.display = 'inline-block';
+          progress.style.display = 'none';
+          banner.classList.add('show');
+          break;
+
+        case 'downloading':
+          updateState = 'downloading';
+          message.textContent = 'Downloading update...';
+          btn.style.display = 'none';
+          progress.style.display = 'block';
+          progressFill.style.width = `${data.percent}%`;
+          break;
+
+        case 'downloaded':
+          updateState = 'downloaded';
+          message.textContent = 'Update ready to install!';
+          version.textContent = `v${data.version}`;
+          btn.textContent = 'Restart Now';
+          btn.style.display = 'inline-block';
+          progress.style.display = 'none';
+          break;
+
+        case 'error':
+          banner.classList.remove('show');
+          showToast('Update check failed: ' + data.error, true);
+          break;
+
+        case 'not-available':
+          // Silently ignore - no update available
+          break;
+      }
+    });
+
+    function handleUpdateAction() {
+      if (updateState === 'available') {
+        ipcRenderer.invoke('download-update');
+      } else if (updateState === 'downloaded') {
+        ipcRenderer.invoke('install-update');
+      }
+    }
+
+    function dismissUpdate() {
+      document.getElementById('updateBanner').classList.remove('show');
+    }
+
+    // Display app version
+    async function displayVersion() {
+      const version = await ipcRenderer.invoke('get-app-version');
+      document.getElementById('versionDisplay').textContent = `v${version}`;
+    }
+
+    displayVersion();
     init();
   </script>
 </body>

@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let watcher;
@@ -29,6 +30,80 @@ function launchLumixTether() {
   console.log('LUMIX Tether not found');
   return false;
 }
+
+// Auto-updater setup
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for updates...');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'checking' });
+    }
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', {
+        status: 'available',
+        version: info.version,
+        releaseNotes: info.releaseNotes
+      });
+    }
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('No updates available');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'not-available' });
+    }
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', {
+        status: 'downloading',
+        percent: Math.round(progress.percent)
+      });
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded:', info.version);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', {
+        status: 'downloaded',
+        version: info.version
+      });
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status: 'error', error: err.message });
+    }
+  });
+}
+
+// IPC handlers for updates
+ipcMain.handle('check-for-updates', () => {
+  autoUpdater.checkForUpdates();
+});
+
+ipcMain.handle('download-update', () => {
+  autoUpdater.downloadUpdate();
+});
+
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -69,7 +144,17 @@ function createWindow() {
   setTimeout(() => launchLumixTether(), 1000);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  setupAutoUpdater();
+  createWindow();
+
+  // Check for updates after window is ready (delay to ensure UI is loaded)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(err => {
+      console.log('Update check failed:', err.message);
+    });
+  }, 3000);
+});
 
 app.on('window-all-closed', () => {
   if (watcher) watcher.close();
