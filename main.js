@@ -295,9 +295,13 @@ ipcMain.handle('save-session', async (event, data) => {
     fs.mkdirSync(personFolder, { recursive: true });
   }
 
-  // Generate new filename with shoot number prefix
+  // Count existing files to generate photo number
+  const existingFiles = fs.readdirSync(personFolder).filter(f => f.startsWith(shootNumber));
+  const photoNum = String(existingFiles.length + 1).padStart(2, '0');
+
+  // Generate new filename with shoot number prefix and photo counter
   const ext = path.extname(originalFile);
-  const newFileName = `${shootNumber}_${safeName}${ext}`;
+  const newFileName = `${shootNumber}_${safeName}_${photoNum}${ext}`;
   const newFilePath = path.join(personFolder, newFileName);
 
   // Copy file to new location
