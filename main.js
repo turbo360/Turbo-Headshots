@@ -36,13 +36,11 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  // Configure for private GitHub repo
+  // Configure for GitHub releases (public repo)
   autoUpdater.setFeedURL({
     provider: 'github',
     owner: 'turbo360',
-    repo: 'Turbo-Headshots',
-    private: true,
-    token: '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'
+    repo: 'Turbo-Headshots'
   });
 
   autoUpdater.on('checking-for-update', () => {
