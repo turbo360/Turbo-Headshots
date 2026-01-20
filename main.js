@@ -256,8 +256,8 @@ ipcMain.handle('open-folder', (event, folderPath) => {
   shell.openPath(folderPath);
 });
 
-// Track recently processed files to prevent duplicates
-const recentlyProcessed = new Set();
+// Track recently processed files to prevent duplicates (by filename, not full path)
+const recentlyProcessed = new Map(); // filename -> timestamp
 
 // Start watching folder for new images
 function startWatcher() {
@@ -275,10 +275,11 @@ function startWatcher() {
     persistent: true,
     ignoreInitial: true,
     awaitWriteFinish: {
-      stabilityThreshold: 3000,  // Wait 3 seconds for file to finish writing
+      stabilityThreshold: 2000,
       pollInterval: 500
     },
-    depth: 1
+    depth: 1,
+    usePolling: false
   });
 
   watcher.on('add', (filePath) => {
@@ -286,17 +287,27 @@ function startWatcher() {
     const imageExtensions = ['.jpg', '.jpeg', '.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
 
     if (imageExtensions.includes(ext)) {
-      // Prevent duplicate processing of same file
-      if (recentlyProcessed.has(filePath)) {
-        console.log('Skipping duplicate:', filePath);
+      const filename = path.basename(filePath);
+      const now = Date.now();
+
+      // Check if this filename was processed recently (within 30 seconds)
+      const lastProcessed = recentlyProcessed.get(filename);
+      if (lastProcessed && (now - lastProcessed) < 30000) {
+        console.log('Skipping duplicate:', filename);
         return;
       }
 
-      // Mark as processed and clear after 10 seconds
-      recentlyProcessed.add(filePath);
-      setTimeout(() => recentlyProcessed.delete(filePath), 10000);
+      // Mark as processed with current timestamp
+      recentlyProcessed.set(filename, now);
 
-      console.log('New image detected:', filePath);
+      // Clean up old entries (older than 60 seconds)
+      for (const [key, time] of recentlyProcessed.entries()) {
+        if (now - time > 60000) {
+          recentlyProcessed.delete(key);
+        }
+      }
+
+      console.log('New image detected:', filename);
       mainWindow.webContents.send('new-image', filePath);
     }
   });
