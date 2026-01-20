@@ -36,8 +36,14 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  // GitHub token for private repo access
-  process.env.GH_TOKEN = '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';
+  // Configure for private GitHub repo
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'turbo360',
+    repo: 'Turbo-Headshots',
+    private: true,
+    token: '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'
+  });
 
   autoUpdater.on('checking-for-update', () => {
     console.log('Checking for updates...');
