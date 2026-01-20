@@ -196,6 +196,17 @@ function createWindow() {
       sessionsFile = settings.sessionsFile || '';
       contactsFile = settings.contactsFile || '';
 
+      // Ensure contacts.csv exists if outputFolder is set (for upgrades from older versions)
+      if (outputFolder && fs.existsSync(outputFolder)) {
+        if (!contactsFile) {
+          contactsFile = path.join(outputFolder, 'contacts.csv');
+          saveSettings();
+        }
+        if (!fs.existsSync(contactsFile)) {
+          fs.writeFileSync(contactsFile, 'shoot_number,first_name,last_name,email,mobile,company\n');
+        }
+      }
+
       // Start watcher if folder exists
       if (watchFolder && fs.existsSync(watchFolder)) {
         startWatcher();
