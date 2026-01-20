@@ -9,6 +9,40 @@ let watcher;
 let watchFolder = '';
 let outputFolder = '';
 let sessionsFile = '';
+let contactsFile = '';
+
+// Generate unique shoot number in format YYYYMMDD-NNN
+function generateShootNumber() {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+
+  const counterPath = path.join(app.getPath('userData'), 'shoot_counter.json');
+  let counter = { date: dateStr, count: 0 };
+
+  // Read existing counter
+  if (fs.existsSync(counterPath)) {
+    try {
+      counter = JSON.parse(fs.readFileSync(counterPath, 'utf-8'));
+      // Reset counter if it's a new day
+      if (counter.date !== dateStr) {
+        counter = { date: dateStr, count: 0 };
+      }
+    } catch (e) {
+      console.log('Error reading counter:', e);
+      counter = { date: dateStr, count: 0 };
+    }
+  }
+
+  // Increment counter
+  counter.count++;
+
+  // Save updated counter
+  fs.writeFileSync(counterPath, JSON.stringify(counter));
+
+  // Format: YYYYMMDD-NNN
+  const shootNumber = `${dateStr}-${String(counter.count).padStart(3, '0')}`;
+  return shootNumber;
+}
 
 // Try to launch LUMIX Tether on startup
 function launchLumixTether() {
@@ -112,6 +146,29 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+// Start a new session - generate shoot number and write to contacts.csv
+ipcMain.handle('start-session', async (event, data) => {
+  const { firstName, lastName, email, mobile, company } = data;
+
+  if (!outputFolder || !fs.existsSync(outputFolder)) {
+    return { success: false, error: 'Output folder not set' };
+  }
+
+  try {
+    const shootNumber = generateShootNumber();
+
+    // Write to contacts.csv
+    if (contactsFile) {
+      const csvLine = `"${shootNumber}","${firstName}","${lastName}","${email}","${mobile || ''}","${company || ''}"\n`;
+      fs.appendFileSync(contactsFile, csvLine);
+    }
+
+    return { success: true, shootNumber };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
@@ -137,7 +194,8 @@ function createWindow() {
       watchFolder = settings.watchFolder || '';
       outputFolder = settings.outputFolder || '';
       sessionsFile = settings.sessionsFile || '';
-      
+      contactsFile = settings.contactsFile || '';
+
       // Start watcher if folder exists
       if (watchFolder && fs.existsSync(watchFolder)) {
         startWatcher();
@@ -198,12 +256,18 @@ ipcMain.handle('select-output-folder', async () => {
   if (!result.canceled && result.filePaths.length > 0) {
     outputFolder = result.filePaths[0];
     sessionsFile = path.join(outputFolder, 'headshot_sessions.csv');
-    
-    // Create CSV if it doesn't exist
+    contactsFile = path.join(outputFolder, 'contacts.csv');
+
+    // Create headshot_sessions.csv if it doesn't exist
     if (!fs.existsSync(sessionsFile)) {
-      fs.writeFileSync(sessionsFile, 'timestamp,first_name,last_name,email,company,original_filename,new_filename,original_path,new_path\n');
+      fs.writeFileSync(sessionsFile, 'shoot_number,timestamp,first_name,last_name,email,mobile,company,original_filename,new_filename,original_path,new_path\n');
     }
-    
+
+    // Create contacts.csv if it doesn't exist
+    if (!fs.existsSync(contactsFile)) {
+      fs.writeFileSync(contactsFile, 'shoot_number,first_name,last_name,email,mobile,company\n');
+    }
+
     saveSettings();
     return outputFolder;
   }
@@ -217,34 +281,34 @@ ipcMain.handle('get-settings', () => {
 
 // Save a headshot session
 ipcMain.handle('save-session', async (event, data) => {
-  const { firstName, lastName, email, company, originalFile } = data;
-  
+  const { firstName, lastName, email, mobile, company, shootNumber, originalFile } = data;
+
   if (!outputFolder || !fs.existsSync(outputFolder)) {
     return { success: false, error: 'Output folder not set' };
   }
-  
-  // Create person's folder
+
+  // Create person's folder using shoot number
   const safeName = `${lastName}_${firstName}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const personFolder = path.join(outputFolder, safeName);
+  const folderName = `${shootNumber}_${safeName}`;
+  const personFolder = path.join(outputFolder, folderName);
   if (!fs.existsSync(personFolder)) {
     fs.mkdirSync(personFolder, { recursive: true });
   }
-  
-  // Generate new filename with timestamp
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  // Generate new filename with shoot number prefix
   const ext = path.extname(originalFile);
-  const newFileName = `${safeName}_${timestamp}${ext}`;
+  const newFileName = `${shootNumber}_${safeName}${ext}`;
   const newFilePath = path.join(personFolder, newFileName);
-  
+
   // Copy file to new location
   try {
     fs.copyFileSync(originalFile, newFilePath);
-    
-    // Append to CSV
+
+    // Append to CSV (includes shoot_number and mobile)
     const originalFileName = path.basename(originalFile);
-    const csvLine = `"${new Date().toISOString()}","${firstName}","${lastName}","${email}","${company || ''}","${originalFileName}","${newFileName}","${originalFile}","${newFilePath}"\n`;
+    const csvLine = `"${shootNumber}","${new Date().toISOString()}","${firstName}","${lastName}","${email}","${mobile || ''}","${company || ''}","${originalFileName}","${newFileName}","${originalFile}","${newFilePath}"\n`;
     fs.appendFileSync(sessionsFile, csvLine);
-    
+
     return { success: true, newPath: newFilePath, personFolder };
   } catch (err) {
     return { success: false, error: err.message };
@@ -326,5 +390,5 @@ function startWatcher() {
 
 function saveSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({ watchFolder, outputFolder, sessionsFile }));
+  fs.writeFileSync(settingsPath, JSON.stringify({ watchFolder, outputFolder, sessionsFile, contactsFile }));
 }
