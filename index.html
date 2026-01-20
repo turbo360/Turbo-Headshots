@@ -371,26 +371,27 @@
       showToast('Session ended. Ready for next person!');
     }
     
-    // Listen for new images - only show JPEG previews
+    // Listen for new images
     ipcRenderer.on('new-image', async (event, filePath) => {
       console.log('New image detected:', filePath);
-      
+
       const ext = path.extname(filePath).toLowerCase();
       const isJpeg = ['.jpg', '.jpeg'].includes(ext);
-      
+      const isRaw = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'].includes(ext);
+
       // Only show preview for JPEGs
       if (isJpeg) {
         const previewArea = document.getElementById('previewArea');
         previewArea.innerHTML = `<img src="file://${filePath}?t=${Date.now()}" alt="Preview">`;
       }
-      
-      // If session is active, save the file (both RAW and JPEG)
-      if (isSessionActive && currentPerson) {
+
+      // If session is active, save only RAW files (JPEGs are just for preview)
+      if (isSessionActive && currentPerson && isRaw) {
         const result = await ipcRenderer.invoke('save-session', {
           ...currentPerson,
           originalFile: filePath
         });
-        
+
         if (result.success) {
           sessionPhotoCount++;
           currentPersonFolder = result.personFolder;
@@ -399,7 +400,7 @@
         } else {
           showToast('Error saving: ' + result.error, true);
         }
-      } else if (!isSessionActive) {
+      } else if (!isSessionActive && isRaw) {
         showToast('Start a session first to save photos', true);
       }
     });
