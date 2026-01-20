@@ -42,7 +42,10 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
-      "entitlementsInherit": "entitlements.mac.plist"
+      "entitlementsInherit": "entitlements.mac.plist",
+      "notarize": {
+        "teamId": "ETURVK9WSA"
+      }
     },
     "dmg": {
       "title": "Turbo Headshots",
@@ -60,7 +63,6 @@
         }
       ]
     },
-    "afterSign": "notarize.js",
     "files": [
       "**/*",
       "!*.md"
