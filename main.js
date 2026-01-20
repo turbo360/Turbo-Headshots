@@ -278,7 +278,7 @@ function startWatcher() {
       stabilityThreshold: 2000,
       pollInterval: 500
     },
-    depth: 1,
+    depth: 0,  // Only watch root folder, not subfolders
     usePolling: false
   });
 
@@ -287,6 +287,13 @@ function startWatcher() {
     const imageExtensions = ['.jpg', '.jpeg', '.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
 
     if (imageExtensions.includes(ext)) {
+      // IMPORTANT: Ignore files in subfolders (these are already-organized output files)
+      const fileDir = path.dirname(filePath);
+      if (fileDir !== watchFolder) {
+        console.log('Skipping file in subfolder (already organized):', filePath);
+        return;
+      }
+
       const filename = path.basename(filePath);
       const now = Date.now();
 
