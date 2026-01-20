@@ -1,6 +1,6 @@
 {
   "name": "turbo-headshots",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Headshot registration system for tethered photography",
   "main": "main.js",
   "scripts": {
@@ -22,6 +22,7 @@
   "build": {
     "appId": "com.turbo360.headshots",
     "productName": "Turbo Headshots",
+    "artifactName": "${name}-${version}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.photography",
       "target": [
