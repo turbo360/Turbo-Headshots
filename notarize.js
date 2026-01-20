@@ -13,12 +13,21 @@ exports.default = async function notarizing(context) {
 
   console.log(`Notarizing ${appPath}...`);
 
+  const appleId = process.env.APPLE_ID;
+  const appleIdPassword = process.env.APPLE_APP_SPECIFIC_PASSWORD;
+  const teamId = process.env.APPLE_TEAM_ID;
+
+  if (!appleId || !appleIdPassword || !teamId) {
+    console.log('Skipping notarization - credentials not set');
+    return;
+  }
+
   try {
     await notarize({
       appPath: appPath,
-      appleId: 'james@turboproductions.com.au',
-      appleIdPassword: 'pboa-lbfm-kbgl-plbc',
-      teamId: 'ETURVK9WSA'
+      appleId: appleId,
+      appleIdPassword: appleIdPassword,
+      teamId: teamId
     });
     console.log('Notarization complete!');
   } catch (error) {
