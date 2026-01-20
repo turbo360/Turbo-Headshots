@@ -256,33 +256,46 @@ ipcMain.handle('open-folder', (event, folderPath) => {
   shell.openPath(folderPath);
 });
 
+// Track recently processed files to prevent duplicates
+const recentlyProcessed = new Set();
+
 // Start watching folder for new images
 function startWatcher() {
   // Use chokidar for file watching
   const chokidar = require('chokidar');
-  
+
   if (watcher) watcher.close();
-  
+
   if (!watchFolder || !fs.existsSync(watchFolder)) return;
-  
+
   console.log('Starting watcher on:', watchFolder);
-  
+
   watcher = chokidar.watch(watchFolder, {
     ignored: /(^|[\/\\])\../, // ignore dotfiles
     persistent: true,
     ignoreInitial: true,
     awaitWriteFinish: {
-      stabilityThreshold: 1000,
-      pollInterval: 100
+      stabilityThreshold: 3000,  // Wait 3 seconds for file to finish writing
+      pollInterval: 500
     },
     depth: 1
   });
-  
+
   watcher.on('add', (filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     const imageExtensions = ['.jpg', '.jpeg', '.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
-    
+
     if (imageExtensions.includes(ext)) {
+      // Prevent duplicate processing of same file
+      if (recentlyProcessed.has(filePath)) {
+        console.log('Skipping duplicate:', filePath);
+        return;
+      }
+
+      // Mark as processed and clear after 10 seconds
+      recentlyProcessed.add(filePath);
+      setTimeout(() => recentlyProcessed.delete(filePath), 10000);
+
       console.log('New image detected:', filePath);
       mainWindow.webContents.send('new-image', filePath);
     }
