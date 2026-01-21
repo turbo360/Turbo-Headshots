@@ -328,10 +328,11 @@ class HeadshotProcessor {
       throw new Error('No output formats enabled. Enable at least Portrait or Square in settings.');
     }
 
-    // All processed files go directly into the person's folder (no subfolders)
+    // All AI-processed files go into a "Processed" subfolder
     // Files are distinguished by suffix: -4x5, -4x5-TP, -SQR, -SQR-TP
-    if (!fs.existsSync(outputFolder)) {
-      fs.mkdirSync(outputFolder, { recursive: true });
+    const processedFolder = path.join(outputFolder, 'Processed');
+    if (!fs.existsSync(processedFolder)) {
+      fs.mkdirSync(processedFolder, { recursive: true });
     }
 
     // Step 2: Detect face and calculate smart crop region
@@ -408,7 +409,7 @@ class HeadshotProcessor {
 
       // Save final portrait JPEG with -4x5 suffix
       this.log('Saving 4:5 portrait...', 'step');
-      const finalPortraitPath = path.join(outputFolder, `${baseName}-4x5.jpg`);
+      const finalPortraitPath = path.join(processedFolder, `${baseName}-4x5.jpg`);
       if (portraitImagePath !== croppedPath) {
         fs.copyFileSync(portraitImagePath, finalPortraitPath);
       } else {
@@ -424,7 +425,7 @@ class HeadshotProcessor {
           throw new Error(`Background removal failed: ${bgResult.error}`);
         }
         // Save with -4x5-TP suffix for transparent
-        const transparentPngPath = path.join(outputFolder, `${baseName}-4x5-TP.png`);
+        const transparentPngPath = path.join(processedFolder, `${baseName}-4x5-TP.png`);
         const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
         if (!pngDownloadResult.success) {
           throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
@@ -434,7 +435,7 @@ class HeadshotProcessor {
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
           this.log(`Adding background color ${opts.backgroundColor}...`, 'step');
-          const coloredPath = path.join(outputFolder, `${baseName}-4x5-BG.jpg`);
+          const coloredPath = path.join(processedFolder, `${baseName}-4x5-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentPngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
             results.coloredJpegPath = coloredPath;
@@ -509,7 +510,7 @@ class HeadshotProcessor {
 
       // Save final square JPEG with -SQR suffix
       this.log('Saving square...', 'step');
-      const finalSquarePath = path.join(outputFolder, `${baseName}-SQR.jpg`);
+      const finalSquarePath = path.join(processedFolder, `${baseName}-SQR.jpg`);
       if (squareImagePath !== squarePath) {
         fs.copyFileSync(squareImagePath, finalSquarePath);
       } else {
@@ -525,7 +526,7 @@ class HeadshotProcessor {
           throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
         }
         // Save with -SQR-TP suffix for transparent
-        const transparentSquarePngPath = path.join(outputFolder, `${baseName}-SQR-TP.png`);
+        const transparentSquarePngPath = path.join(processedFolder, `${baseName}-SQR-TP.png`);
         const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
         if (!squarePngDownloadResult.success) {
           throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
@@ -535,7 +536,7 @@ class HeadshotProcessor {
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
           this.log(`Adding background color (square) ${opts.backgroundColor}...`, 'step');
-          const coloredPath = path.join(outputFolder, `${baseName}-SQR-BG.jpg`);
+          const coloredPath = path.join(processedFolder, `${baseName}-SQR-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentSquarePngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
             results.coloredSquareJpegPath = coloredPath;
