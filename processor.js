@@ -30,6 +30,14 @@ class HeadshotProcessor {
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
     this.stopRequested = false; // Flag to stop processing after current item
 
+    // Enhancement options (all enabled by default)
+    this.enhancementOptions = {
+      enableFaceEnhancement: true,
+      enableBackgroundRemoval: true,
+      outputPortrait: true,
+      outputSquare: true
+    };
+
     // Load persisted queue on startup
     this.loadQueue();
   }
@@ -59,6 +67,14 @@ class HeadshotProcessor {
     if (enabled && this.apiKey && this.queue.length > 0 && !this.processing) {
       this.processNext();
     }
+  }
+
+  /**
+   * Set enhancement options
+   */
+  setEnhancementOptions(options) {
+    this.enhancementOptions = { ...this.enhancementOptions, ...options };
+    console.log('Enhancement options updated:', this.enhancementOptions);
   }
 
   /**
@@ -281,15 +297,31 @@ class HeadshotProcessor {
     item.tempFileCreated = tempFileCreated;
     item.workingImagePath = workingImagePath;
 
-    // Create output subfolders for each version type
-    const folders = {
-      portrait: path.join(outputFolder, '4x5'),
-      portraitTransparent: path.join(outputFolder, '4x5_transparent'),
-      square: path.join(outputFolder, 'square'),
-      squareTransparent: path.join(outputFolder, 'square_transparent')
-    };
+    // Get enhancement options
+    const opts = this.enhancementOptions;
+    console.log('Processing with options:', JSON.stringify(opts));
 
-    // Create all subfolders
+    // Check that at least one output is enabled
+    if (!opts.outputPortrait && !opts.outputSquare) {
+      throw new Error('No output formats enabled. Enable at least Portrait or Square in settings.');
+    }
+
+    // Create output subfolders for enabled output types only
+    const folders = {};
+    if (opts.outputPortrait) {
+      folders.portrait = path.join(outputFolder, '4x5');
+      if (opts.enableBackgroundRemoval) {
+        folders.portraitTransparent = path.join(outputFolder, '4x5_transparent');
+      }
+    }
+    if (opts.outputSquare) {
+      folders.square = path.join(outputFolder, 'square');
+      if (opts.enableBackgroundRemoval) {
+        folders.squareTransparent = path.join(outputFolder, 'square_transparent');
+      }
+    }
+
+    // Create subfolders
     for (const folder of Object.values(folders)) {
       if (!fs.existsSync(folder)) {
         fs.mkdirSync(folder, { recursive: true });
@@ -300,80 +332,101 @@ class HeadshotProcessor {
     console.log('Detecting face and calculating crop...');
     const faceData = await this.detectFaceAndCrop(workingImagePath);
 
-    // Step 3: Apply smart crop, color correction, and create cropped versions (temp files)
-    const croppedPath = path.join(outputFolder, `${baseName}_temp_cropped.jpg`);
-    const squarePath = path.join(outputFolder, `${baseName}_temp_square.jpg`);
-
-    await this.applySmartCropAndCorrection(workingImagePath, croppedPath, faceData, HEADSHOT_ASPECT_RATIO);
-    await this.applySmartCropAndCorrection(workingImagePath, squarePath, faceData, SQUARE_ASPECT_RATIO);
-
-    // Step 4: Face enhancement via Replicate (CodeFormer) on the cropped version
     const client = new ReplicateClient(this.apiKey);
-    console.log('Enhancing face (4:5)...');
-    const enhanceResult = await client.enhanceFace(croppedPath);
+    const tempFiles = [];
+    const results = {};
 
-    if (!enhanceResult.success) {
-      throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
+    // Process Portrait (4:5) version if enabled
+    if (opts.outputPortrait) {
+      const croppedPath = path.join(outputFolder, `${baseName}_temp_cropped.jpg`);
+      tempFiles.push(croppedPath);
+
+      await this.applySmartCropAndCorrection(workingImagePath, croppedPath, faceData, HEADSHOT_ASPECT_RATIO);
+
+      let portraitImagePath = croppedPath;
+
+      // Face enhancement if enabled
+      if (opts.enableFaceEnhancement) {
+        console.log('Enhancing face (4:5)...');
+        const enhanceResult = await client.enhanceFace(croppedPath);
+        if (!enhanceResult.success) {
+          throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
+        }
+        portraitImagePath = path.join(folders.portrait, `${baseName}.jpg`);
+        const downloadResult = await client.downloadImage(enhanceResult.url, portraitImagePath);
+        if (!downloadResult.success) {
+          throw new Error(`Failed to download enhanced image: ${downloadResult.error}`);
+        }
+        results.enhancedJpegPath = portraitImagePath;
+      } else {
+        // Just copy the cropped version without AI enhancement
+        portraitImagePath = path.join(folders.portrait, `${baseName}.jpg`);
+        fs.copyFileSync(croppedPath, portraitImagePath);
+        results.enhancedJpegPath = portraitImagePath;
+      }
+
+      // Background removal if enabled
+      if (opts.enableBackgroundRemoval) {
+        console.log('Removing background (4:5)...');
+        const bgResult = await client.removeBackground(portraitImagePath);
+        if (!bgResult.success) {
+          throw new Error(`Background removal failed: ${bgResult.error}`);
+        }
+        const transparentPngPath = path.join(folders.portraitTransparent, `${baseName}.png`);
+        const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
+        if (!pngDownloadResult.success) {
+          throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
+        }
+        results.transparentPngPath = transparentPngPath;
+      }
     }
 
-    // Download enhanced image (4:5 ratio) to 4x5 folder
-    const enhancedJpegPath = path.join(folders.portrait, `${baseName}.jpg`);
-    const downloadResult = await client.downloadImage(enhanceResult.url, enhancedJpegPath);
+    // Process Square (1:1) version if enabled
+    if (opts.outputSquare) {
+      const squarePath = path.join(outputFolder, `${baseName}_temp_square.jpg`);
+      tempFiles.push(squarePath);
 
-    if (!downloadResult.success) {
-      throw new Error(`Failed to download enhanced image: ${downloadResult.error}`);
-    }
+      await this.applySmartCropAndCorrection(workingImagePath, squarePath, faceData, SQUARE_ASPECT_RATIO);
 
-    // Step 5: Enhance the square version too
-    console.log('Enhancing face (square)...');
-    const enhanceSquareResult = await client.enhanceFace(squarePath);
+      let squareImagePath = squarePath;
 
-    if (!enhanceSquareResult.success) {
-      throw new Error(`Square face enhancement failed: ${enhanceSquareResult.error}`);
-    }
+      // Face enhancement if enabled
+      if (opts.enableFaceEnhancement) {
+        console.log('Enhancing face (square)...');
+        const enhanceSquareResult = await client.enhanceFace(squarePath);
+        if (!enhanceSquareResult.success) {
+          throw new Error(`Square face enhancement failed: ${enhanceSquareResult.error}`);
+        }
+        squareImagePath = path.join(folders.square, `${baseName}.jpg`);
+        const squareDownloadResult = await client.downloadImage(enhanceSquareResult.url, squareImagePath);
+        if (!squareDownloadResult.success) {
+          throw new Error(`Failed to download enhanced square image: ${squareDownloadResult.error}`);
+        }
+        results.enhancedSquarePath = squareImagePath;
+      } else {
+        // Just copy the cropped version without AI enhancement
+        squareImagePath = path.join(folders.square, `${baseName}.jpg`);
+        fs.copyFileSync(squarePath, squareImagePath);
+        results.enhancedSquarePath = squareImagePath;
+      }
 
-    // Download enhanced square image to square folder
-    const enhancedSquarePath = path.join(folders.square, `${baseName}.jpg`);
-    const squareDownloadResult = await client.downloadImage(enhanceSquareResult.url, enhancedSquarePath);
-
-    if (!squareDownloadResult.success) {
-      throw new Error(`Failed to download enhanced square image: ${squareDownloadResult.error}`);
-    }
-
-    // Step 6: Background removal via Replicate (on the 4:5 version)
-    console.log('Removing background (4:5)...');
-    const bgResult = await client.removeBackground(enhancedJpegPath);
-
-    if (!bgResult.success) {
-      throw new Error(`Background removal failed: ${bgResult.error}`);
-    }
-
-    // Download transparent PNG (4:5 ratio) to 4x5_transparent folder
-    const transparentPngPath = path.join(folders.portraitTransparent, `${baseName}.png`);
-    const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
-
-    if (!pngDownloadResult.success) {
-      throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
-    }
-
-    // Step 7: Background removal for square version
-    console.log('Removing background (square)...');
-    const bgSquareResult = await client.removeBackground(enhancedSquarePath);
-
-    if (!bgSquareResult.success) {
-      throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
-    }
-
-    // Download transparent square PNG to square_transparent folder
-    const transparentSquarePngPath = path.join(folders.squareTransparent, `${baseName}.png`);
-    const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
-
-    if (!squarePngDownloadResult.success) {
-      throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
+      // Background removal if enabled
+      if (opts.enableBackgroundRemoval) {
+        console.log('Removing background (square)...');
+        const bgSquareResult = await client.removeBackground(squareImagePath);
+        if (!bgSquareResult.success) {
+          throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
+        }
+        const transparentSquarePngPath = path.join(folders.squareTransparent, `${baseName}.png`);
+        const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
+        if (!squarePngDownloadResult.success) {
+          throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
+        }
+        results.transparentSquarePngPath = transparentSquarePngPath;
+      }
     }
 
     // Clean up temp files
-    const tempFiles = [croppedPath, squarePath];
     for (const tempFile of tempFiles) {
       if (fs.existsSync(tempFile)) {
         try { fs.unlinkSync(tempFile); } catch (e) { /* ignore */ }
@@ -381,19 +434,11 @@ class HeadshotProcessor {
     }
 
     // Update item with output paths
-    item.enhancedJpegPath = enhancedJpegPath;
-    item.enhancedSquarePath = enhancedSquarePath;
-    item.transparentPngPath = transparentPngPath;
-    item.transparentSquarePngPath = transparentSquarePngPath;
+    Object.assign(item, results);
 
     console.log('Processing complete:', baseName);
 
-    return {
-      enhancedJpegPath,
-      enhancedSquarePath,
-      transparentPngPath,
-      transparentSquarePngPath
-    };
+    return results;
   }
 
   /**
@@ -655,30 +700,44 @@ class HeadshotProcessor {
    * Stop processing after current item completes
    */
   stopProcessing() {
-    if (this.processing) {
-      this.stopRequested = true;
-      console.log('Stop requested - will stop after current item completes');
-      return { success: true, message: 'Processing will stop after current item' };
+    this.stopRequested = true;
+    this.processingEnabled = false;
+
+    // If currently processing, mark the item back to pending so it's not lost
+    if (this.processing && this.currentItem) {
+      this.currentItem.status = 'pending';
+      this.currentItem.retries = 0;
+      console.log('Stop requested - current item returned to pending');
     }
-    return { success: true, message: 'Processing was not active' };
+
+    this.processing = false;
+    this.currentItem = null;
+    this.saveQueue();
+    this.notifyStatusUpdate();
+
+    console.log('Processing stopped');
+    return { success: true, message: 'Processing stopped' };
   }
 
   /**
-   * Clear queue - removes pending items, optionally clears failed too
+   * Clear queue - removes pending and optionally failed items
    * @param {boolean} clearFailed - Also clear failed items
    */
   clearQueue(clearFailed = false) {
-    const pendingCount = this.queue.filter(i => i.status === 'pending').length;
+    // Stop any current processing first
+    this.stopRequested = true;
+    this.processing = false;
+    this.currentItem = null;
+
+    const pendingCount = this.queue.filter(i => i.status === 'pending' || i.status === 'processing').length;
     const failedCount = this.queue.filter(i => i.status === 'failed').length;
 
     if (clearFailed) {
-      // Clear everything except completed and currently processing
-      this.queue = this.queue.filter(i =>
-        i.status === 'completed' || i.status === 'processing'
-      );
+      // Clear everything except completed
+      this.queue = this.queue.filter(i => i.status === 'completed');
     } else {
-      // Clear only pending items
-      this.queue = this.queue.filter(i => i.status !== 'pending');
+      // Clear pending and processing items (but keep failed and completed)
+      this.queue = this.queue.filter(i => i.status !== 'pending' && i.status !== 'processing');
     }
 
     this.saveQueue();

@@ -450,6 +450,44 @@
         </label>
       </div>
 
+      <h3 style="margin: 20px 0 15px 0; font-size: 1em; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">Enhancement Options</h3>
+
+      <div class="toggle-group">
+        <label>Face Enhancement (subtle touch-ups)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="enableFaceEnhancement" onchange="saveEnhancementOptions()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-group">
+        <label>Background Removal (transparent PNG)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="enableBackgroundRemoval" onchange="saveEnhancementOptions()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <h3 style="margin: 20px 0 15px 0; font-size: 1em; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">Output Formats</h3>
+
+      <div class="toggle-group">
+        <label>Portrait (4:5 aspect ratio)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="outputPortrait" onchange="saveEnhancementOptions()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-group">
+        <label>Square (1:1 aspect ratio)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="outputSquare" onchange="saveEnhancementOptions()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <h3 style="margin: 20px 0 15px 0; font-size: 1em; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">API Configuration</h3>
+
       <div class="form-group">
         <label>Replicate API Key</label>
         <input type="password" id="apiKeyInput" placeholder="r8_xxxxxxxxxxxx">
@@ -786,7 +824,11 @@
     let aiSettings = {
       hasApiKey: false,
       processingEnabled: true,
-      autoProcessOnCapture: true
+      autoProcessOnCapture: true,
+      enableFaceEnhancement: true,
+      enableBackgroundRemoval: true,
+      outputPortrait: true,
+      outputSquare: true
     };
 
     let queueStatus = {
@@ -865,6 +907,31 @@
     function updateSettingsUI() {
       document.getElementById('processingEnabled').checked = aiSettings.processingEnabled;
       document.getElementById('autoProcessEnabled').checked = aiSettings.autoProcessOnCapture;
+      document.getElementById('enableFaceEnhancement').checked = aiSettings.enableFaceEnhancement;
+      document.getElementById('enableBackgroundRemoval').checked = aiSettings.enableBackgroundRemoval;
+      document.getElementById('outputPortrait').checked = aiSettings.outputPortrait;
+      document.getElementById('outputSquare').checked = aiSettings.outputSquare;
+    }
+
+    async function saveEnhancementOptions() {
+      const options = {
+        enableFaceEnhancement: document.getElementById('enableFaceEnhancement').checked,
+        enableBackgroundRemoval: document.getElementById('enableBackgroundRemoval').checked,
+        outputPortrait: document.getElementById('outputPortrait').checked,
+        outputSquare: document.getElementById('outputSquare').checked
+      };
+
+      // Validate at least one output format is selected
+      if (!options.outputPortrait && !options.outputSquare) {
+        showToast('Please select at least one output format', true);
+        // Revert to previous values
+        updateSettingsUI();
+        return;
+      }
+
+      await ipcRenderer.invoke('set-ai-settings', options);
+      Object.assign(aiSettings, options);
+      showToast('Enhancement options saved');
     }
 
     function openSettingsModal() {
