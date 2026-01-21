@@ -11,6 +11,10 @@ const sharp = require('sharp');
 // Max dimension for images sent to API (larger images are resized)
 const MAX_API_IMAGE_DIMENSION = 2048;
 
+// Rate limiting: 6 requests per minute for accounts with < $5 credit
+// We'll use 12 seconds between requests to be safe (5 per minute)
+const MIN_REQUEST_INTERVAL_MS = 12000;
+
 // Enhancement intensity mappings (off, low, medium, high)
 const INTENSITY_MAP = {
   off: null,
@@ -30,6 +34,7 @@ class ReplicateClient {
   constructor(apiKey) {
     this.apiKey = apiKey;
     this.baseUrl = 'https://api.replicate.com/v1';
+    this.lastRequestTime = 0; // For rate limiting
     this.models = {
       // Background removal - rembg with u2net for better hair/edges
       backgroundRemoval: 'cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
@@ -53,6 +58,23 @@ class ReplicateClient {
       backgroundRemoval: true,
       backgroundColor: null           // null = transparent, or hex color like '#FFFFFF'
     };
+  }
+
+  /**
+   * Rate limiter - waits if needed before making a request
+   * Replicate limits to 6 req/min for accounts with < $5 credit
+   */
+  async waitForRateLimit() {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+
+    if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) {
+      const waitTime = MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest;
+      console.log(`Rate limiting: waiting ${Math.round(waitTime / 1000)}s before next API call...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+
+    this.lastRequestTime = Date.now();
   }
 
   /**
@@ -148,6 +170,9 @@ class ReplicateClient {
     try {
       const imageUri = await this.imageToDataUri(imagePath);
 
+      // Wait for rate limit before making API call
+      await this.waitForRateLimit();
+
       const response = await axios.post(
         `${this.baseUrl}/predictions`,
         {
@@ -192,6 +217,9 @@ class ReplicateClient {
       const fidelity = INTENSITY_MAP[intensity] || 0.6;
 
       console.log(`Face enhancement with fidelity ${fidelity} (${intensity})`);
+
+      // Wait for rate limit before making API call
+      await this.waitForRateLimit();
 
       const response = await axios.post(
         `${this.baseUrl}/predictions`,
@@ -248,6 +276,9 @@ class ReplicateClient {
 
       console.log(`Skin smoothing with scale ${scale} (${intensity})`);
 
+      // Wait for rate limit before making API call
+      await this.waitForRateLimit();
+
       const response = await axios.post(
         `${this.baseUrl}/predictions`,
         {
@@ -296,6 +327,9 @@ class ReplicateClient {
       const scaleFactor = UPSCALE_MAP[scale] || 2;
 
       console.log(`Upscaling image ${scaleFactor}x`);
+
+      // Wait for rate limit before making API call
+      await this.waitForRateLimit();
 
       const response = await axios.post(
         `${this.baseUrl}/predictions`,
