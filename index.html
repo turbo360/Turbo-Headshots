@@ -238,6 +238,11 @@
     .btn-small.btn-highlight { background: rgba(200, 50, 50, 0.3); border: 1px solid rgba(200, 50, 50, 0.5); }
     .btn-small.btn-highlight:hover { background: rgba(200, 50, 50, 0.5); }
 
+    /* Warning/Stop button */
+    .btn-small.btn-warning { background: rgba(252, 196, 25, 0.3); border: 1px solid rgba(252, 196, 25, 0.5); color: #fcc419; }
+    .btn-small.btn-warning:hover { background: rgba(252, 196, 25, 0.4); }
+    .btn-small.btn-warning:disabled { opacity: 0.4; color: #888; }
+
     /* Session folder list */
     .session-folder-list { max-height: 400px; overflow-y: auto; margin-bottom: 15px; }
     .session-folder-item {
@@ -389,6 +394,8 @@
       </div>
       <div class="queue-actions">
         <button class="btn-small btn-highlight" onclick="openReprocessModal()">Reprocess Existing</button>
+        <button class="btn-small btn-warning" id="stopProcessingBtn" onclick="stopProcessing()" disabled>Stop</button>
+        <button class="btn-small btn-warning" id="clearQueueBtn" onclick="clearQueue()" disabled>Clear Queue</button>
         <button class="btn-small" id="retryFailedBtn" onclick="retryFailed()" disabled>Retry Failed</button>
         <button class="btn-small" id="clearCompletedBtn" onclick="clearCompleted()" disabled>Clear Completed</button>
         <button class="btn-small" onclick="openSettingsModal()">Settings</button>
@@ -851,6 +858,8 @@
 
       document.getElementById('retryFailedBtn').disabled = !status.failed;
       document.getElementById('clearCompletedBtn').disabled = !status.completed;
+      document.getElementById('stopProcessingBtn').disabled = !status.isProcessing;
+      document.getElementById('clearQueueBtn').disabled = !(status.pending || status.failed);
     }
 
     function updateSettingsUI() {
@@ -927,6 +936,38 @@
     async function clearCompleted() {
       await ipcRenderer.invoke('clear-completed');
       showToast('Cleared completed items');
+    }
+
+    async function stopProcessing() {
+      const result = await ipcRenderer.invoke('stop-processing');
+      if (result.success) {
+        showToast(result.message);
+      } else {
+        showToast('Error: ' + result.error, true);
+      }
+    }
+
+    async function clearQueue() {
+      // Ask if they want to clear failed items too
+      const hasFailed = queueStatus.failed > 0;
+      const hasPending = queueStatus.pending > 0;
+
+      let clearFailed = false;
+      if (hasFailed && hasPending) {
+        clearFailed = confirm('Also clear failed items?\n\nClick OK to clear pending AND failed items.\nClick Cancel to clear only pending items.');
+      } else if (hasFailed && !hasPending) {
+        clearFailed = true; // Only failed items exist
+      }
+
+      const result = await ipcRenderer.invoke('clear-queue', clearFailed);
+      if (result.success) {
+        const msg = [];
+        if (result.clearedPending > 0) msg.push(`${result.clearedPending} pending`);
+        if (result.clearedFailed > 0) msg.push(`${result.clearedFailed} failed`);
+        showToast(`Cleared ${msg.join(' and ')} item(s)`);
+      } else {
+        showToast('Error: ' + result.error, true);
+      }
     }
 
     function openExternal(url) {

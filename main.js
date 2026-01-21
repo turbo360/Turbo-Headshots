@@ -417,6 +417,22 @@ ipcMain.handle('clear-completed', () => {
   }
 });
 
+// Stop processing (after current item completes)
+ipcMain.handle('stop-processing', () => {
+  if (processor) {
+    return processor.stopProcessing();
+  }
+  return { success: false, error: 'Processor not initialized' };
+});
+
+// Clear queue (pending items, optionally failed too)
+ipcMain.handle('clear-queue', (event, clearFailed = false) => {
+  if (processor) {
+    return processor.clearQueue(clearFailed);
+  }
+  return { success: false, error: 'Processor not initialized' };
+});
+
 // Get list of existing session folders for reprocessing
 ipcMain.handle('get-session-folders', () => {
   if (!outputFolder || !fs.existsSync(outputFolder)) {

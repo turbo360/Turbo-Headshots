@@ -28,6 +28,7 @@ class HeadshotProcessor {
     this.onStatusUpdate = null; // Callback for UI updates
     this.watchFolder = null; // Set by main.js for JPEG fallback lookup
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
+    this.stopRequested = false; // Flag to stop processing after current item
 
     // Load persisted queue on startup
     this.loadQueue();
@@ -202,6 +203,13 @@ class HeadshotProcessor {
     this.currentItem = null;
     this.saveQueue();
     this.notifyStatusUpdate();
+
+    // Check if stop was requested
+    if (this.stopRequested) {
+      this.stopRequested = false;
+      console.log('Processing stopped by user request');
+      return;
+    }
 
     // Process next item
     setImmediate(() => this.processNext());
@@ -620,6 +628,49 @@ class HeadshotProcessor {
         error: i.error,
         retries: i.retries
       }));
+  }
+
+  /**
+   * Stop processing after current item completes
+   */
+  stopProcessing() {
+    if (this.processing) {
+      this.stopRequested = true;
+      console.log('Stop requested - will stop after current item completes');
+      return { success: true, message: 'Processing will stop after current item' };
+    }
+    return { success: true, message: 'Processing was not active' };
+  }
+
+  /**
+   * Clear queue - removes pending items, optionally clears failed too
+   * @param {boolean} clearFailed - Also clear failed items
+   */
+  clearQueue(clearFailed = false) {
+    const pendingCount = this.queue.filter(i => i.status === 'pending').length;
+    const failedCount = this.queue.filter(i => i.status === 'failed').length;
+
+    if (clearFailed) {
+      // Clear everything except completed and currently processing
+      this.queue = this.queue.filter(i =>
+        i.status === 'completed' || i.status === 'processing'
+      );
+    } else {
+      // Clear only pending items
+      this.queue = this.queue.filter(i => i.status !== 'pending');
+    }
+
+    this.saveQueue();
+    this.notifyStatusUpdate();
+
+    const clearedFailed = clearFailed ? failedCount : 0;
+    console.log(`Queue cleared: ${pendingCount} pending, ${clearedFailed} failed items removed`);
+
+    return {
+      success: true,
+      clearedPending: pendingCount,
+      clearedFailed: clearedFailed
+    };
   }
 }
 
