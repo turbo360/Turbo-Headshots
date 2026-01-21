@@ -30,12 +30,15 @@ class HeadshotProcessor {
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
     this.stopRequested = false; // Flag to stop processing after current item
 
-    // Enhancement options (all enabled by default)
+    // Enhancement options with scalable intensity controls
     this.enhancementOptions = {
-      enableFaceEnhancement: true,
-      enableBackgroundRemoval: true,
       outputPortrait: true,
-      outputSquare: true
+      outputSquare: true,
+      faceEnhancement: 'medium',    // off, low, medium, high
+      skinSmoothing: 'off',         // off, low, medium, high
+      upscaling: 'off',             // off, 2x, 4x
+      backgroundRemoval: true,
+      backgroundColor: ''           // Empty = transparent, or hex like '#FFFFFF'
     };
 
     // Load persisted queue on startup
@@ -310,13 +313,13 @@ class HeadshotProcessor {
     const folders = {};
     if (opts.outputPortrait) {
       folders.portrait = path.join(outputFolder, '4x5');
-      if (opts.enableBackgroundRemoval) {
+      if (opts.backgroundRemoval) {
         folders.portraitTransparent = path.join(outputFolder, '4x5_transparent');
       }
     }
     if (opts.outputSquare) {
       folders.square = path.join(outputFolder, 'square');
-      if (opts.enableBackgroundRemoval) {
+      if (opts.backgroundRemoval) {
         folders.squareTransparent = path.join(outputFolder, 'square_transparent');
       }
     }
@@ -345,30 +348,73 @@ class HeadshotProcessor {
 
       let portraitImagePath = croppedPath;
 
-      // Face enhancement if enabled
-      if (opts.enableFaceEnhancement) {
-        console.log('Enhancing face (4:5)...');
-        const enhanceResult = await client.enhanceFace(croppedPath);
-        if (!enhanceResult.success) {
+      // Face enhancement if enabled (scalable: off, low, medium, high)
+      if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
+        console.log(`Enhancing face (4:5) - intensity: ${opts.faceEnhancement}...`);
+        const enhanceResult = await client.enhanceFace(croppedPath, opts.faceEnhancement);
+        if (!enhanceResult.success && !enhanceResult.skipped) {
           throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
         }
-        portraitImagePath = path.join(folders.portrait, `${baseName}.jpg`);
-        const downloadResult = await client.downloadImage(enhanceResult.url, portraitImagePath);
-        if (!downloadResult.success) {
-          throw new Error(`Failed to download enhanced image: ${downloadResult.error}`);
+        if (enhanceResult.url) {
+          const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_enhanced.jpg`);
+          tempFiles.push(tempEnhancedPath);
+          const downloadResult = await client.downloadImage(enhanceResult.url, tempEnhancedPath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download enhanced image: ${downloadResult.error}`);
+          }
+          portraitImagePath = tempEnhancedPath;
         }
-        results.enhancedJpegPath = portraitImagePath;
-      } else {
-        // Just copy the cropped version without AI enhancement
-        portraitImagePath = path.join(folders.portrait, `${baseName}.jpg`);
-        fs.copyFileSync(croppedPath, portraitImagePath);
-        results.enhancedJpegPath = portraitImagePath;
       }
 
+      // Skin smoothing if enabled (scalable: off, low, medium, high)
+      if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
+        console.log(`Smoothing skin (4:5) - intensity: ${opts.skinSmoothing}...`);
+        const skinResult = await client.smoothSkin(portraitImagePath, opts.skinSmoothing);
+        if (!skinResult.success && !skinResult.skipped) {
+          throw new Error(`Skin smoothing failed: ${skinResult.error}`);
+        }
+        if (skinResult.url) {
+          const tempSkinPath = path.join(outputFolder, `${baseName}_temp_skin.jpg`);
+          tempFiles.push(tempSkinPath);
+          const downloadResult = await client.downloadImage(skinResult.url, tempSkinPath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download skin-smoothed image: ${downloadResult.error}`);
+          }
+          portraitImagePath = tempSkinPath;
+        }
+      }
+
+      // Upscaling if enabled (scalable: off, 2x, 4x)
+      if (opts.upscaling && opts.upscaling !== 'off') {
+        console.log(`Upscaling (4:5) - scale: ${opts.upscaling}...`);
+        const upscaleResult = await client.upscaleImage(portraitImagePath, opts.upscaling);
+        if (!upscaleResult.success && !upscaleResult.skipped) {
+          throw new Error(`Upscaling failed: ${upscaleResult.error}`);
+        }
+        if (upscaleResult.url) {
+          const tempUpscalePath = path.join(outputFolder, `${baseName}_temp_upscale.jpg`);
+          tempFiles.push(tempUpscalePath);
+          const downloadResult = await client.downloadImage(upscaleResult.url, tempUpscalePath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download upscaled image: ${downloadResult.error}`);
+          }
+          portraitImagePath = tempUpscalePath;
+        }
+      }
+
+      // Save final portrait JPEG
+      const finalPortraitPath = path.join(folders.portrait, `${baseName}.jpg`);
+      if (portraitImagePath !== croppedPath) {
+        fs.copyFileSync(portraitImagePath, finalPortraitPath);
+      } else {
+        fs.copyFileSync(croppedPath, finalPortraitPath);
+      }
+      results.enhancedJpegPath = finalPortraitPath;
+
       // Background removal if enabled
-      if (opts.enableBackgroundRemoval) {
+      if (opts.backgroundRemoval) {
         console.log('Removing background (4:5)...');
-        const bgResult = await client.removeBackground(portraitImagePath);
+        const bgResult = await client.removeBackground(finalPortraitPath);
         if (!bgResult.success) {
           throw new Error(`Background removal failed: ${bgResult.error}`);
         }
@@ -378,6 +424,16 @@ class HeadshotProcessor {
           throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
         }
         results.transparentPngPath = transparentPngPath;
+
+        // Add solid background color if specified
+        if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+          console.log(`Adding background color: ${opts.backgroundColor}`);
+          const coloredPath = path.join(folders.portrait, `${baseName}_colored.jpg`);
+          const colorResult = await client.addBackgroundColor(transparentPngPath, coloredPath, opts.backgroundColor);
+          if (colorResult.success) {
+            results.coloredJpegPath = coloredPath;
+          }
+        }
       }
     }
 
@@ -390,30 +446,73 @@ class HeadshotProcessor {
 
       let squareImagePath = squarePath;
 
-      // Face enhancement if enabled
-      if (opts.enableFaceEnhancement) {
-        console.log('Enhancing face (square)...');
-        const enhanceSquareResult = await client.enhanceFace(squarePath);
-        if (!enhanceSquareResult.success) {
-          throw new Error(`Square face enhancement failed: ${enhanceSquareResult.error}`);
+      // Face enhancement if enabled (scalable: off, low, medium, high)
+      if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
+        console.log(`Enhancing face (square) - intensity: ${opts.faceEnhancement}...`);
+        const enhanceResult = await client.enhanceFace(squarePath, opts.faceEnhancement);
+        if (!enhanceResult.success && !enhanceResult.skipped) {
+          throw new Error(`Square face enhancement failed: ${enhanceResult.error}`);
         }
-        squareImagePath = path.join(folders.square, `${baseName}.jpg`);
-        const squareDownloadResult = await client.downloadImage(enhanceSquareResult.url, squareImagePath);
-        if (!squareDownloadResult.success) {
-          throw new Error(`Failed to download enhanced square image: ${squareDownloadResult.error}`);
+        if (enhanceResult.url) {
+          const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_sq_enhanced.jpg`);
+          tempFiles.push(tempEnhancedPath);
+          const downloadResult = await client.downloadImage(enhanceResult.url, tempEnhancedPath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download enhanced square image: ${downloadResult.error}`);
+          }
+          squareImagePath = tempEnhancedPath;
         }
-        results.enhancedSquarePath = squareImagePath;
-      } else {
-        // Just copy the cropped version without AI enhancement
-        squareImagePath = path.join(folders.square, `${baseName}.jpg`);
-        fs.copyFileSync(squarePath, squareImagePath);
-        results.enhancedSquarePath = squareImagePath;
       }
 
+      // Skin smoothing if enabled (scalable: off, low, medium, high)
+      if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
+        console.log(`Smoothing skin (square) - intensity: ${opts.skinSmoothing}...`);
+        const skinResult = await client.smoothSkin(squareImagePath, opts.skinSmoothing);
+        if (!skinResult.success && !skinResult.skipped) {
+          throw new Error(`Square skin smoothing failed: ${skinResult.error}`);
+        }
+        if (skinResult.url) {
+          const tempSkinPath = path.join(outputFolder, `${baseName}_temp_sq_skin.jpg`);
+          tempFiles.push(tempSkinPath);
+          const downloadResult = await client.downloadImage(skinResult.url, tempSkinPath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download skin-smoothed square image: ${downloadResult.error}`);
+          }
+          squareImagePath = tempSkinPath;
+        }
+      }
+
+      // Upscaling if enabled (scalable: off, 2x, 4x)
+      if (opts.upscaling && opts.upscaling !== 'off') {
+        console.log(`Upscaling (square) - scale: ${opts.upscaling}...`);
+        const upscaleResult = await client.upscaleImage(squareImagePath, opts.upscaling);
+        if (!upscaleResult.success && !upscaleResult.skipped) {
+          throw new Error(`Square upscaling failed: ${upscaleResult.error}`);
+        }
+        if (upscaleResult.url) {
+          const tempUpscalePath = path.join(outputFolder, `${baseName}_temp_sq_upscale.jpg`);
+          tempFiles.push(tempUpscalePath);
+          const downloadResult = await client.downloadImage(upscaleResult.url, tempUpscalePath);
+          if (!downloadResult.success) {
+            throw new Error(`Failed to download upscaled square image: ${downloadResult.error}`);
+          }
+          squareImagePath = tempUpscalePath;
+        }
+      }
+
+      // Save final square JPEG
+      const finalSquarePath = path.join(folders.square, `${baseName}.jpg`);
+      if (squareImagePath !== squarePath) {
+        fs.copyFileSync(squareImagePath, finalSquarePath);
+      } else {
+        fs.copyFileSync(squarePath, finalSquarePath);
+      }
+      results.enhancedSquarePath = finalSquarePath;
+
       // Background removal if enabled
-      if (opts.enableBackgroundRemoval) {
+      if (opts.backgroundRemoval) {
         console.log('Removing background (square)...');
-        const bgSquareResult = await client.removeBackground(squareImagePath);
+        const bgSquareResult = await client.removeBackground(finalSquarePath);
         if (!bgSquareResult.success) {
           throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
         }
@@ -423,6 +522,16 @@ class HeadshotProcessor {
           throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
         }
         results.transparentSquarePngPath = transparentSquarePngPath;
+
+        // Add solid background color if specified
+        if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+          console.log(`Adding background color (square): ${opts.backgroundColor}`);
+          const coloredPath = path.join(folders.square, `${baseName}_colored.jpg`);
+          const colorResult = await client.addBackgroundColor(transparentSquarePngPath, coloredPath, opts.backgroundColor);
+          if (colorResult.success) {
+            results.coloredSquareJpegPath = coloredPath;
+          }
+        }
       }
     }
 

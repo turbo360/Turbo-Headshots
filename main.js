@@ -19,11 +19,17 @@ let aiSettings = {
   replicateApiKey: '',
   processingEnabled: true,
   autoProcessOnCapture: true,
-  // Enhancement options
-  enableFaceEnhancement: true,
-  enableBackgroundRemoval: true,
+  // Output format options
   outputPortrait: true,      // 4:5 aspect ratio
-  outputSquare: true         // 1:1 aspect ratio
+  outputSquare: true,        // 1:1 aspect ratio
+  // Enhancement options (off, low, medium, high)
+  faceEnhancement: 'medium',
+  skinSmoothing: 'off',
+  // Upscaling (off, 2x, 4x)
+  upscaling: 'off',
+  // Background options
+  backgroundRemoval: true,
+  backgroundColor: ''        // Empty = transparent, or hex like '#FFFFFF'
 };
 
 // Generate unique shoot number in format YYYYMMDD-NNN
@@ -223,11 +229,15 @@ function createWindow() {
       aiSettings.replicateApiKey = settings.replicateApiKey || '';
       aiSettings.processingEnabled = settings.processingEnabled !== false;
       aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture !== false;
-      // Enhancement options (default to true if not set)
-      aiSettings.enableFaceEnhancement = settings.enableFaceEnhancement !== false;
-      aiSettings.enableBackgroundRemoval = settings.enableBackgroundRemoval !== false;
+      // Output format options
       aiSettings.outputPortrait = settings.outputPortrait !== false;
       aiSettings.outputSquare = settings.outputSquare !== false;
+      // Scalable enhancement options
+      aiSettings.faceEnhancement = settings.faceEnhancement || 'medium';
+      aiSettings.skinSmoothing = settings.skinSmoothing || 'off';
+      aiSettings.upscaling = settings.upscaling || 'off';
+      aiSettings.backgroundRemoval = settings.backgroundRemoval !== false;
+      aiSettings.backgroundColor = settings.backgroundColor || '';
 
       // Configure processor with API key and watch folder
       if (aiSettings.replicateApiKey) {
@@ -235,10 +245,13 @@ function createWindow() {
       }
       processor.setProcessingEnabled(aiSettings.processingEnabled);
       processor.setEnhancementOptions({
-        enableFaceEnhancement: aiSettings.enableFaceEnhancement,
-        enableBackgroundRemoval: aiSettings.enableBackgroundRemoval,
         outputPortrait: aiSettings.outputPortrait,
-        outputSquare: aiSettings.outputSquare
+        outputSquare: aiSettings.outputSquare,
+        faceEnhancement: aiSettings.faceEnhancement,
+        skinSmoothing: aiSettings.skinSmoothing,
+        upscaling: aiSettings.upscaling,
+        backgroundRemoval: aiSettings.backgroundRemoval,
+        backgroundColor: aiSettings.backgroundColor
       });
       if (watchFolder) {
         processor.setWatchFolder(watchFolder);
@@ -350,10 +363,13 @@ ipcMain.handle('get-ai-settings', () => {
     hasApiKey: !!aiSettings.replicateApiKey,
     processingEnabled: aiSettings.processingEnabled,
     autoProcessOnCapture: aiSettings.autoProcessOnCapture,
-    enableFaceEnhancement: aiSettings.enableFaceEnhancement,
-    enableBackgroundRemoval: aiSettings.enableBackgroundRemoval,
     outputPortrait: aiSettings.outputPortrait,
-    outputSquare: aiSettings.outputSquare
+    outputSquare: aiSettings.outputSquare,
+    faceEnhancement: aiSettings.faceEnhancement,
+    skinSmoothing: aiSettings.skinSmoothing,
+    upscaling: aiSettings.upscaling,
+    backgroundRemoval: aiSettings.backgroundRemoval,
+    backgroundColor: aiSettings.backgroundColor
   };
 });
 
@@ -377,40 +393,45 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   if (settings.autoProcessOnCapture !== undefined) {
     aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture;
   }
-  // Enhancement options
-  if (settings.enableFaceEnhancement !== undefined) {
-    aiSettings.enableFaceEnhancement = settings.enableFaceEnhancement;
-  }
-  if (settings.enableBackgroundRemoval !== undefined) {
-    aiSettings.enableBackgroundRemoval = settings.enableBackgroundRemoval;
-  }
+  // Output format options
   if (settings.outputPortrait !== undefined) {
     aiSettings.outputPortrait = settings.outputPortrait;
   }
   if (settings.outputSquare !== undefined) {
     aiSettings.outputSquare = settings.outputSquare;
   }
+  // Scalable enhancement options
+  if (settings.faceEnhancement !== undefined) {
+    aiSettings.faceEnhancement = settings.faceEnhancement;
+  }
+  if (settings.skinSmoothing !== undefined) {
+    aiSettings.skinSmoothing = settings.skinSmoothing;
+  }
+  if (settings.upscaling !== undefined) {
+    aiSettings.upscaling = settings.upscaling;
+  }
+  if (settings.backgroundRemoval !== undefined) {
+    aiSettings.backgroundRemoval = settings.backgroundRemoval;
+  }
+  if (settings.backgroundColor !== undefined) {
+    aiSettings.backgroundColor = settings.backgroundColor;
+  }
 
   // Update processor with enhancement options
   if (processor) {
     processor.setEnhancementOptions({
-      enableFaceEnhancement: aiSettings.enableFaceEnhancement,
-      enableBackgroundRemoval: aiSettings.enableBackgroundRemoval,
       outputPortrait: aiSettings.outputPortrait,
-      outputSquare: aiSettings.outputSquare
+      outputSquare: aiSettings.outputSquare,
+      faceEnhancement: aiSettings.faceEnhancement,
+      skinSmoothing: aiSettings.skinSmoothing,
+      upscaling: aiSettings.upscaling,
+      backgroundRemoval: aiSettings.backgroundRemoval,
+      backgroundColor: aiSettings.backgroundColor
     });
   }
 
   saveSettings();
-  console.log('Settings saved. Current aiSettings:', JSON.stringify({
-    hasKey: !!aiSettings.replicateApiKey,
-    keyLength: aiSettings.replicateApiKey?.length,
-    processingEnabled: aiSettings.processingEnabled,
-    enableFaceEnhancement: aiSettings.enableFaceEnhancement,
-    enableBackgroundRemoval: aiSettings.enableBackgroundRemoval,
-    outputPortrait: aiSettings.outputPortrait,
-    outputSquare: aiSettings.outputSquare
-  }));
+  console.log('Settings saved. Current aiSettings:', JSON.stringify(aiSettings));
 
   return { success: true };
 });
@@ -751,10 +772,13 @@ function saveSettings() {
     replicateApiKey: aiSettings.replicateApiKey,
     processingEnabled: aiSettings.processingEnabled,
     autoProcessOnCapture: aiSettings.autoProcessOnCapture,
-    enableFaceEnhancement: aiSettings.enableFaceEnhancement,
-    enableBackgroundRemoval: aiSettings.enableBackgroundRemoval,
     outputPortrait: aiSettings.outputPortrait,
-    outputSquare: aiSettings.outputSquare
+    outputSquare: aiSettings.outputSquare,
+    faceEnhancement: aiSettings.faceEnhancement,
+    skinSmoothing: aiSettings.skinSmoothing,
+    upscaling: aiSettings.upscaling,
+    backgroundRemoval: aiSettings.backgroundRemoval,
+    backgroundColor: aiSettings.backgroundColor
   };
   console.log('Saving settings to:', settingsPath);
   console.log('API key length being saved:', aiSettings.replicateApiKey?.length || 0);

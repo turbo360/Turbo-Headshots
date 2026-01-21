@@ -1,6 +1,6 @@
 {
   "name": "turbo-headshots",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Headshot registration system for tethered photography",
   "main": "main.js",
   "scripts": {
