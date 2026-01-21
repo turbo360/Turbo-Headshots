@@ -219,11 +219,14 @@ function createWindow() {
       aiSettings.processingEnabled = settings.processingEnabled !== false;
       aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture !== false;
 
-      // Configure processor with API key
+      // Configure processor with API key and watch folder
       if (aiSettings.replicateApiKey) {
         processor.setApiKey(aiSettings.replicateApiKey);
       }
       processor.setProcessingEnabled(aiSettings.processingEnabled);
+      if (watchFolder) {
+        processor.setWatchFolder(watchFolder);
+      }
 
       // Ensure contacts.csv exists if outputFolder is set (for upgrades from older versions)
       if (outputFolder && fs.existsSync(outputFolder)) {
@@ -281,6 +284,10 @@ ipcMain.handle('select-watch-folder', async () => {
     watchFolder = result.filePaths[0];
     saveSettings();
     startWatcher();
+    // Update processor with watch folder for JPEG fallback lookup
+    if (processor) {
+      processor.setWatchFolder(watchFolder);
+    }
     return watchFolder;
   }
   return null;
@@ -551,6 +558,31 @@ ipcMain.handle('save-session', async (event, data) => {
   // Copy file to new location
   try {
     fs.copyFileSync(originalFile, newFilePath);
+
+    // If this is a RAW file, also copy the corresponding JPEG if it exists (needed for AI processing)
+    const rawExtensionsLower = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
+    if (rawExtensionsLower.includes(ext.toLowerCase())) {
+      // Look for JPEG with same name in source folder
+      const originalDir = path.dirname(originalFile);
+      const originalBaseName = path.basename(originalFile, ext);
+
+      // Try different JPEG naming conventions
+      const jpegVariants = [
+        path.join(originalDir, `${originalBaseName}.jpg`),
+        path.join(originalDir, `${originalBaseName}.JPG`),
+        path.join(originalDir, `${originalBaseName}.jpeg`),
+        path.join(originalDir, `${originalBaseName}.JPEG`)
+      ];
+
+      for (const jpegSource of jpegVariants) {
+        if (fs.existsSync(jpegSource)) {
+          const jpegDest = path.join(personFolder, `${baseName}.jpg`);
+          fs.copyFileSync(jpegSource, jpegDest);
+          console.log('Copied JPEG for AI processing:', jpegDest);
+          break;
+        }
+      }
+    }
 
     // Append to CSV (includes shoot_number, mobile, and processing status)
     const originalFileName = path.basename(originalFile);

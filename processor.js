@@ -26,10 +26,18 @@ class HeadshotProcessor {
     this.processingEnabled = true;
     this.maxRetries = 3;
     this.onStatusUpdate = null; // Callback for UI updates
+    this.watchFolder = null; // Set by main.js for JPEG fallback lookup
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
 
     // Load persisted queue on startup
     this.loadQueue();
+  }
+
+  /**
+   * Set the watch folder path for JPEG fallback lookup
+   */
+  setWatchFolder(folder) {
+    this.watchFolder = folder;
   }
 
   /**
@@ -210,24 +218,60 @@ class HeadshotProcessor {
       throw new Error('Source file not found');
     }
 
-    // Step 1: Find working image (JPEG for RAW files)
+    // Step 1: Find or create working image (JPEG/TIFF for RAW files)
     const ext = path.extname(sourcePath).toLowerCase();
     let workingImagePath;
+    let tempFileCreated = false;
 
     if (['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'].includes(ext)) {
-      const jpegSource = sourcePath.replace(ext, '.jpg');
-      const jpegSourceAlt = sourcePath.replace(ext, '.JPG');
+      // Try to find existing JPEG in output folder
+      const jpegInOutput = sourcePath.replace(new RegExp(ext + '$', 'i'), '.jpg');
+      const jpegInOutputAlt = sourcePath.replace(new RegExp(ext + '$', 'i'), '.JPG');
 
-      if (fs.existsSync(jpegSource)) {
-        workingImagePath = jpegSource;
-      } else if (fs.existsSync(jpegSourceAlt)) {
-        workingImagePath = jpegSourceAlt;
-      } else {
-        throw new Error('No JPEG preview available for RAW file. Please enable JPEG+RAW mode on camera.');
+      if (fs.existsSync(jpegInOutput)) {
+        workingImagePath = jpegInOutput;
+        console.log('Found JPEG in output folder:', workingImagePath);
+      } else if (fs.existsSync(jpegInOutputAlt)) {
+        workingImagePath = jpegInOutputAlt;
+        console.log('Found JPEG in output folder:', workingImagePath);
+      } else if (this.watchFolder) {
+        // Try to find JPEG in watch folder with original naming
+        const originalBaseName = path.basename(sourcePath, ext);
+        // Extract the original filename pattern (remove shoot number prefix)
+        const match = originalBaseName.match(/_(\d+)$/);
+        if (match) {
+          // Try common camera naming patterns in watch folder
+          const watchFiles = fs.existsSync(this.watchFolder) ? fs.readdirSync(this.watchFolder) : [];
+          const jpegFile = watchFiles.find(f =>
+            f.toLowerCase().endsWith('.jpg') &&
+            (f.includes(originalBaseName) || watchFiles.indexOf(f) !== -1)
+          );
+          if (jpegFile) {
+            workingImagePath = path.join(this.watchFolder, jpegFile);
+            console.log('Found JPEG in watch folder:', workingImagePath);
+          }
+        }
+      }
+
+      // If still no JPEG, try to convert RAW using sips (macOS) or dcraw
+      if (!workingImagePath) {
+        console.log('No JPEG found, attempting RAW conversion...');
+        const convertedPath = await this.convertRawToJpeg(sourcePath, outputFolder, baseName);
+        if (convertedPath) {
+          workingImagePath = convertedPath;
+          tempFileCreated = true;
+          console.log('Converted RAW to JPEG:', workingImagePath);
+        } else {
+          throw new Error('No JPEG available and RAW conversion failed. Please enable JPEG+RAW mode on camera, or install dcraw for RAW processing.');
+        }
       }
     } else {
       workingImagePath = sourcePath;
     }
+
+    // Store temp file flag for cleanup
+    item.tempFileCreated = tempFileCreated;
+    item.workingImagePath = workingImagePath;
 
     // Step 2: Detect face and calculate smart crop region
     console.log('Detecting face and calculating crop...');
@@ -449,6 +493,71 @@ class HeadshotProcessor {
         mozjpeg: true
       })
       .toFile(outputPath);
+  }
+
+  /**
+   * Convert RAW file to JPEG using available tools (sips, dcraw)
+   */
+  async convertRawToJpeg(rawPath, outputFolder, baseName) {
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+
+    const outputPath = path.join(outputFolder, `${baseName}_converted.jpg`);
+
+    // Try dcraw first (better quality, supports more formats)
+    try {
+      // dcraw -c -w outputs to stdout, we pipe to convert or save directly
+      // -w: use camera white balance
+      // -q 3: high quality interpolation
+      // -T: output TIFF
+      const tiffPath = path.join(outputFolder, `${baseName}_temp.tiff`);
+      await execPromise(`dcraw -w -q 3 -T -o 1 -c "${rawPath}" > "${tiffPath}"`);
+
+      if (fs.existsSync(tiffPath)) {
+        // Convert TIFF to high-quality JPEG using sharp
+        await sharp(tiffPath)
+          .jpeg({ quality: 95 })
+          .toFile(outputPath);
+        fs.unlinkSync(tiffPath);
+        console.log('RAW converted via dcraw');
+        return outputPath;
+      }
+    } catch (err) {
+      console.log('dcraw not available or failed:', err.message);
+    }
+
+    // Try sips (macOS built-in) - limited RAW support but works for some formats
+    try {
+      await execPromise(`sips -s format jpeg -s formatOptions 95 "${rawPath}" --out "${outputPath}"`);
+      if (fs.existsSync(outputPath)) {
+        console.log('RAW converted via sips');
+        return outputPath;
+      }
+    } catch (err) {
+      console.log('sips failed:', err.message);
+    }
+
+    // Try using macOS CoreImage via quick script
+    try {
+      const script = `
+        tell application "Image Events"
+          launch
+          set theImage to open "${rawPath}"
+          save theImage as JPEG in "${outputPath}" with compression level medium
+          close theImage
+        end tell
+      `;
+      await execPromise(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
+      if (fs.existsSync(outputPath)) {
+        console.log('RAW converted via Image Events');
+        return outputPath;
+      }
+    } catch (err) {
+      console.log('Image Events failed:', err.message);
+    }
+
+    return null;
   }
 
   /**
