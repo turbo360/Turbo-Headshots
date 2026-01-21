@@ -551,39 +551,86 @@ class HeadshotProcessor {
   }
 
   /**
-   * Detect face position using smartcrop and calculate optimal crop region
+   * Detect face/nose position using smartcrop and calculate optimal crop region
+   * Handles EXIF orientation to get correct dimensions
+   * The nose (center of face) is used as the horizontal center reference
    */
   async detectFaceAndCrop(imagePath) {
+    // First, create a properly oriented temp image for face detection
+    // This ensures smartcrop works with the correct orientation
     const metadata = await sharp(imagePath).metadata();
-    const { width, height } = metadata;
 
-    // Use smartcrop to find the best face-focused region
-    // Request a square crop to find the face center
-    const result = await smartcrop.crop(imagePath, {
-      width: Math.min(width, height),
-      height: Math.min(width, height),
-      boost: [{ x: 0, y: 0, width: width, height: height * 0.7, weight: 1.0 }] // Boost upper portion where faces typically are
+    // Check if image needs rotation based on EXIF orientation
+    const needsRotation = metadata.orientation && metadata.orientation > 1;
+
+    let width, height, tempPath = null;
+
+    if (needsRotation) {
+      // Create a temp file with correct orientation for smartcrop
+      tempPath = imagePath.replace(/\.[^.]+$/, `_detect_temp_${Date.now()}.jpg`);
+      await sharp(imagePath)
+        .rotate() // Auto-orient based on EXIF
+        .jpeg({ quality: 95 })
+        .toFile(tempPath);
+
+      const orientedMeta = await sharp(tempPath).metadata();
+      width = orientedMeta.width;
+      height = orientedMeta.height;
+      console.log(`Image rotated for detection: ${width}x${height} (was ${metadata.width}x${metadata.height}, orientation: ${metadata.orientation})`);
+    } else {
+      width = metadata.width;
+      height = metadata.height;
+    }
+
+    const imageToCrop = tempPath || imagePath;
+
+    // Step 1: Do a tight face detection to find the actual face region
+    // Use a small square crop to pinpoint the face/nose area
+    const faceResult = await smartcrop.crop(imageToCrop, {
+      width: Math.round(Math.min(width, height) * 0.3),  // Small square for precise face detection
+      height: Math.round(Math.min(width, height) * 0.3),
+      boost: [
+        // Heavily boost the upper-center region where faces typically are
+        {
+          x: Math.round(width * 0.25),
+          y: 0,
+          width: Math.round(width * 0.5),
+          height: Math.round(height * 0.5),
+          weight: 2.0
+        }
+      ]
     });
 
-    const topCrop = result.topCrop;
+    // Clean up temp file
+    if (tempPath && fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch (e) { /* ignore */ }
+    }
 
-    // Calculate face center from smartcrop result
-    const faceCenterX = topCrop.x + topCrop.width / 2;
-    const faceCenterY = topCrop.y + topCrop.height / 2;
+    const faceRegion = faceResult.topCrop;
 
-    // Estimate face bounds (smartcrop doesn't give exact face box, so we estimate)
-    // The crop region usually centers on the face, so we use it as reference
-    const estimatedFaceHeight = topCrop.height * 0.4; // Face is roughly 40% of the crop height
-    const estimatedFaceTop = faceCenterY - estimatedFaceHeight * 0.6; // Face center is ~60% down the face
+    // The nose is at the center of the detected face region
+    // This is our primary horizontal reference point
+    const noseCenterX = faceRegion.x + faceRegion.width / 2;
+    const noseCenterY = faceRegion.y + faceRegion.height / 2;
+
+    // Estimate the full face height based on the detected region
+    // A face is roughly as wide as it is tall, so we use the region width
+    const estimatedFaceHeight = faceRegion.width * 1.3; // Face is slightly taller than wide
+
+    console.log(`Face/nose detection: region (${faceRegion.x}, ${faceRegion.y}) ${faceRegion.width}x${faceRegion.height}`);
+    console.log(`Nose center: (${Math.round(noseCenterX)}, ${Math.round(noseCenterY)})`);
 
     return {
       imageWidth: width,
       imageHeight: height,
-      faceCenterX,
-      faceCenterY,
-      estimatedFaceTop,
+      // Nose/face center is the primary horizontal reference
+      faceCenterX: noseCenterX,
+      faceCenterY: noseCenterY,
+      noseCenterX,
+      noseCenterY,
       estimatedFaceHeight,
-      smartcropRegion: topCrop
+      smartcropRegion: faceRegion,
+      wasRotated: needsRotation
     };
   }
 
@@ -653,29 +700,149 @@ class HeadshotProcessor {
 
     console.log(`Cropping: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) - face center: (${Math.round(faceCenterX)}, ${Math.round(faceCenterY)}) - aspect ratio: ${aspectRatio}`);
 
-    // Apply crop and color correction
+    // First, create a properly oriented version of the image
+    // This ensures all subsequent operations use correct coordinates
+    const orientedTempPath = inputPath.replace(/\.[^.]+$/, `_oriented_${Date.now()}.jpg`);
+
     await sharp(inputPath)
-      .extract({
-        left: cropX,
-        top: cropY,
-        width: cropWidth,
-        height: cropHeight
-      })
-      .normalize() // Auto white balance / histogram stretch
-      .modulate({
-        saturation: 1.08,  // Slightly reduced saturation boost
-        brightness: 1.02
-      })
-      .sharpen({
-        sigma: 0.8,
-        m1: 0.5,
-        m2: 0.5
-      })
-      .jpeg({
-        quality: 92,
-        mozjpeg: true
-      })
-      .toFile(outputPath);
+      .rotate() // Auto-orient based on EXIF orientation tag
+      .jpeg({ quality: 98 })
+      .toFile(orientedTempPath);
+
+    try {
+      // Verify the oriented image dimensions match our expected dimensions
+      const orientedMeta = await sharp(orientedTempPath).metadata();
+      console.log(`Oriented image: ${orientedMeta.width}x${orientedMeta.height}, expected: ${imageWidth}x${imageHeight}`);
+
+      // Recalculate crop if dimensions don't match (shouldn't happen, but safety check)
+      if (orientedMeta.width !== imageWidth || orientedMeta.height !== imageHeight) {
+        console.log('Warning: Dimension mismatch after rotation, recalculating crop');
+        // Swap coordinates if needed
+        const scaleX = orientedMeta.width / imageWidth;
+        const scaleY = orientedMeta.height / imageHeight;
+        cropX = Math.round(cropX * scaleX);
+        cropY = Math.round(cropY * scaleY);
+        cropWidth = Math.round(cropWidth * scaleX);
+        cropHeight = Math.round(cropHeight * scaleY);
+      }
+
+      // Ensure crop is within bounds
+      cropX = Math.max(0, Math.min(cropX, orientedMeta.width - cropWidth));
+      cropY = Math.max(0, Math.min(cropY, orientedMeta.height - cropHeight));
+      cropWidth = Math.min(cropWidth, orientedMeta.width - cropX);
+      cropHeight = Math.min(cropHeight, orientedMeta.height - cropY);
+
+      // Calculate white balance correction using gray world algorithm
+      const whiteBalanceCorrection = await this.calculateWhiteBalance(orientedTempPath);
+
+      // Apply crop and color correction to the already-oriented image
+      await sharp(orientedTempPath)
+        .extract({
+          left: cropX,
+          top: cropY,
+          width: cropWidth,
+          height: cropHeight
+        })
+        .recomb(whiteBalanceCorrection.matrix) // Apply white balance correction
+        .modulate({
+          saturation: 1.05,  // Subtle saturation boost
+          brightness: 1.01
+        })
+        .sharpen({
+          sigma: 0.8,
+          m1: 0.5,
+          m2: 0.5
+        })
+        .jpeg({
+          quality: 92,
+          mozjpeg: true
+        })
+        .toFile(outputPath);
+    } finally {
+      // Clean up temp oriented file
+      if (fs.existsSync(orientedTempPath)) {
+        try { fs.unlinkSync(orientedTempPath); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
+  /**
+   * Calculate white balance correction using gray world algorithm
+   * Assumes the average color of the image should be neutral gray
+   */
+  async calculateWhiteBalance(imagePath) {
+    try {
+      // Get image statistics for white balance calculation
+      const { channels, dominant } = await sharp(imagePath)
+        .rotate() // Apply EXIF orientation first
+        .resize(200, 200, { fit: 'inside' }) // Downsample for faster processing
+        .raw()
+        .toBuffer({ resolveWithObject: true })
+        .then(async ({ data, info }) => {
+          const { width, height, channels } = info;
+          const pixelCount = width * height;
+
+          // Calculate average RGB values
+          let rSum = 0, gSum = 0, bSum = 0;
+          for (let i = 0; i < data.length; i += channels) {
+            rSum += data[i];
+            gSum += data[i + 1];
+            bSum += data[i + 2];
+          }
+
+          const rAvg = rSum / pixelCount;
+          const gAvg = gSum / pixelCount;
+          const bAvg = bSum / pixelCount;
+
+          return {
+            channels: { r: rAvg, g: gAvg, b: bAvg },
+            dominant: (rAvg + gAvg + bAvg) / 3
+          };
+        });
+
+      // Calculate correction factors (gray world algorithm)
+      // Target is to make average color neutral (equal R, G, B)
+      const gray = dominant;
+      let rFactor = gray / channels.r;
+      let gFactor = gray / channels.g;
+      let bFactor = gray / channels.b;
+
+      // Limit correction to avoid over-correction (max 30% adjustment)
+      const maxCorrection = 1.3;
+      const minCorrection = 0.7;
+      rFactor = Math.max(minCorrection, Math.min(maxCorrection, rFactor));
+      gFactor = Math.max(minCorrection, Math.min(maxCorrection, gFactor));
+      bFactor = Math.max(minCorrection, Math.min(maxCorrection, bFactor));
+
+      // Normalize so green channel stays at 1.0 (standard reference)
+      const normFactor = 1 / gFactor;
+      rFactor *= normFactor;
+      gFactor = 1.0;
+      bFactor *= normFactor;
+
+      console.log(`White balance correction: R=${rFactor.toFixed(3)}, G=${gFactor.toFixed(3)}, B=${bFactor.toFixed(3)}`);
+
+      // Return as 3x3 color matrix for sharp.recomb()
+      return {
+        matrix: [
+          [rFactor, 0, 0],
+          [0, gFactor, 0],
+          [0, 0, bFactor]
+        ],
+        factors: { r: rFactor, g: gFactor, b: bFactor }
+      };
+    } catch (error) {
+      console.log('White balance calculation failed, using defaults:', error.message);
+      // Return identity matrix (no correction)
+      return {
+        matrix: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1]
+        ],
+        factors: { r: 1, g: 1, b: 1 }
+      };
+    }
   }
 
   /**
