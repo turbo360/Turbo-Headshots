@@ -22,6 +22,7 @@
     header .logo { height: 60px; margin-bottom: 10px; }
     header h1 { font-size: 1.8em; font-weight: 400; margin-bottom: 5px; color: #fff; }
     header p { color: #a0a0a0; font-size: 0.9em; }
+    header .processing-indicator { display: inline-flex; margin-top: 15px; }
     
     .status-bar {
       display: flex; gap: 20px; margin-bottom: 30px; padding: 15px;
@@ -135,6 +136,103 @@
       height: 100%; background: #fff; transition: width 0.3s; width: 0%;
     }
     .version-display { position: fixed; bottom: 10px; right: 15px; font-size: 0.75em; color: #555; }
+
+    /* AI Processing Status */
+    .processing-indicator {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.08); padding: 8px 15px;
+      border-radius: 20px; font-size: 0.85em; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .processing-indicator:hover { background: rgba(255,255,255,0.12); }
+    .processing-indicator .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #666;
+    }
+    .processing-indicator .dot.active { background: #51cf66; animation: pulse 1.5s ease-in-out infinite; }
+    .processing-indicator .dot.warning { background: #fcc419; }
+    .processing-indicator .dot.error { background: #ff6b6b; }
+    .processing-indicator .dot.disabled { background: #666; }
+
+    /* Settings Modal */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7); z-index: 3000;
+      display: none; align-items: center; justify-content: center;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: #1a1a2e; border-radius: 16px; padding: 30px;
+      width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .modal h2 { margin-bottom: 20px; font-weight: 500; }
+    .modal .form-group { margin-bottom: 20px; }
+    .modal .form-group label { display: block; font-size: 0.85em; color: #aaa; margin-bottom: 8px; }
+    .modal .form-group input[type="text"],
+    .modal .form-group input[type="password"] {
+      width: 100%; padding: 12px 15px; border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px; background: rgba(0,0,0,0.3); color: #fff; font-size: 1em;
+    }
+    .modal .form-group input:focus { outline: none; border-color: #c83232; }
+    .modal-actions { display: flex; gap: 10px; margin-top: 25px; }
+    .modal-actions .btn { flex: 1; }
+    .btn-secondary {
+      background: rgba(255,255,255,0.1); color: #fff; border: none;
+      padding: 12px 20px; border-radius: 10px; cursor: pointer; font-size: 1em;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+    /* Toggle Switch */
+    .toggle-group { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+    .toggle-group label { font-size: 0.9em; color: #ccc; }
+    .toggle-switch {
+      position: relative; width: 50px; height: 26px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(255,255,255,0.1); border-radius: 26px; transition: 0.3s;
+    }
+    .toggle-slider:before {
+      position: absolute; content: ""; height: 20px; width: 20px;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s;
+    }
+    .toggle-switch input:checked + .toggle-slider { background: #51cf66; }
+    .toggle-switch input:checked + .toggle-slider:before { transform: translateX(24px); }
+
+    /* Status message */
+    .status-message { padding: 10px 15px; border-radius: 8px; margin-top: 15px; font-size: 0.9em; }
+    .status-message.success { background: rgba(81, 207, 102, 0.2); color: #51cf66; }
+    .status-message.error { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+    .status-message.info { background: rgba(74, 105, 189, 0.2); color: #6a89cc; }
+
+    /* Processing Queue Panel */
+    .queue-panel {
+      background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-top: 20px;
+    }
+    .queue-panel h3 { font-size: 1em; margin-bottom: 15px; color: #aaa; display: flex; align-items: center; gap: 8px; }
+    .queue-stats { display: flex; gap: 15px; flex-wrap: wrap; }
+    .queue-stat {
+      background: rgba(0,0,0,0.2); padding: 10px 15px; border-radius: 8px; text-align: center; min-width: 80px;
+    }
+    .queue-stat .value { font-size: 1.5em; font-weight: 600; color: #fff; }
+    .queue-stat .label { font-size: 0.75em; color: #888; margin-top: 3px; }
+    .queue-stat.pending .value { color: #fcc419; }
+    .queue-stat.processing .value { color: #51cf66; }
+    .queue-stat.failed .value { color: #ff6b6b; }
+    .queue-stat.completed .value { color: #51cf66; }
+
+    .queue-actions { margin-top: 15px; display: flex; gap: 10px; }
+    .btn-small {
+      padding: 8px 15px; font-size: 0.85em; border: none; border-radius: 6px; cursor: pointer;
+      background: rgba(255,255,255,0.1); color: #fff; transition: background 0.2s;
+    }
+    .btn-small:hover { background: rgba(255,255,255,0.2); }
+    .btn-small:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Cost estimate */
+    .cost-estimate { margin-top: 15px; padding: 10px 15px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.85em; color: #888; }
   </style>
 </head>
 <body>
@@ -143,6 +241,10 @@
       <img src="logo.png" alt="Turbo 360" class="logo">
       <h1>Turbo Headshots</h1>
       <p>Register details, then take photos with LUMIX Tether</p>
+      <div class="processing-indicator" id="processingIndicator" onclick="openSettingsModal()">
+        <span class="dot" id="processingDot"></span>
+        <span id="processingText">AI Processing: Setup Required</span>
+      </div>
     </header>
     
     <div class="status-bar">
@@ -228,8 +330,77 @@
         <div class="empty-state">No sessions yet today</div>
       </div>
     </div>
+
+    <!-- Processing Queue Panel -->
+    <div class="queue-panel" id="queuePanel">
+      <h3>AI Enhancement Queue</h3>
+      <div class="queue-stats">
+        <div class="queue-stat pending">
+          <div class="value" id="queuePending">0</div>
+          <div class="label">Pending</div>
+        </div>
+        <div class="queue-stat processing">
+          <div class="value" id="queueProcessing">0</div>
+          <div class="label">Processing</div>
+        </div>
+        <div class="queue-stat failed">
+          <div class="value" id="queueFailed">0</div>
+          <div class="label">Failed</div>
+        </div>
+        <div class="queue-stat completed">
+          <div class="value" id="queueCompleted">0</div>
+          <div class="label">Completed</div>
+        </div>
+      </div>
+      <div class="queue-actions">
+        <button class="btn-small" id="retryFailedBtn" onclick="retryFailed()" disabled>Retry Failed</button>
+        <button class="btn-small" id="clearCompletedBtn" onclick="clearCompleted()" disabled>Clear Completed</button>
+        <button class="btn-small" onclick="openSettingsModal()">Settings</button>
+      </div>
+      <div class="cost-estimate" id="costEstimate">
+        Estimated cost: ~$0.02 per photo (background removal + face enhancement)
+      </div>
+    </div>
   </div>
   
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h2>AI Enhancement Settings</h2>
+
+      <div class="toggle-group">
+        <label>Enable AI Processing</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="processingEnabled" onchange="toggleProcessing()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-group">
+        <label>Auto-process on capture</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoProcessEnabled" onchange="toggleAutoProcess()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>Replicate API Key</label>
+        <input type="password" id="apiKeyInput" placeholder="r8_xxxxxxxxxxxx">
+        <p style="font-size: 0.8em; color: #666; margin-top: 8px;">
+          Get your API key from <a href="#" onclick="openExternal('https://replicate.com/account/api-tokens')" style="color: #6a89cc;">replicate.com</a>
+        </p>
+      </div>
+
+      <div id="connectionStatus"></div>
+
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="testAndSaveApiKey()">Test & Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <!-- Update Banner -->
@@ -543,6 +714,175 @@
 
     displayVersion();
     init();
+
+    // AI Processing UI Functions
+
+    let aiSettings = {
+      hasApiKey: false,
+      processingEnabled: true,
+      autoProcessOnCapture: true
+    };
+
+    let queueStatus = {
+      pending: 0,
+      processing: 0,
+      failed: 0,
+      completed: 0
+    };
+
+    // Initialize AI settings on load
+    async function initAISettings() {
+      try {
+        aiSettings = await ipcRenderer.invoke('get-ai-settings');
+        updateProcessingIndicator();
+        updateSettingsUI();
+
+        // Get initial queue status
+        const status = await ipcRenderer.invoke('get-queue-status');
+        updateQueueUI(status);
+      } catch (err) {
+        console.error('Error loading AI settings:', err);
+      }
+    }
+
+    // Listen for processing status updates
+    ipcRenderer.on('processing-status', (event, status) => {
+      updateQueueUI(status);
+      updateProcessingIndicator(status);
+    });
+
+    function updateProcessingIndicator(status) {
+      const dot = document.getElementById('processingDot');
+      const text = document.getElementById('processingText');
+
+      if (!aiSettings.hasApiKey) {
+        dot.className = 'dot disabled';
+        text.textContent = 'AI Processing: Setup Required';
+        return;
+      }
+
+      if (!aiSettings.processingEnabled) {
+        dot.className = 'dot disabled';
+        text.textContent = 'AI Processing: Disabled';
+        return;
+      }
+
+      if (status && status.isProcessing) {
+        dot.className = 'dot active';
+        text.textContent = `Processing: ${status.pending + 1} remaining`;
+      } else if (status && status.failed > 0) {
+        dot.className = 'dot warning';
+        text.textContent = `AI Processing: ${status.failed} failed`;
+      } else if (status && status.pending > 0) {
+        dot.className = 'dot active';
+        text.textContent = `Queue: ${status.pending} pending`;
+      } else {
+        dot.className = 'dot active';
+        text.textContent = 'AI Processing: Ready';
+      }
+    }
+
+    function updateQueueUI(status) {
+      queueStatus = status;
+
+      document.getElementById('queuePending').textContent = status.pending || 0;
+      document.getElementById('queueProcessing').textContent = status.processing || 0;
+      document.getElementById('queueFailed').textContent = status.failed || 0;
+      document.getElementById('queueCompleted').textContent = status.completed || 0;
+
+      document.getElementById('retryFailedBtn').disabled = !status.failed;
+      document.getElementById('clearCompletedBtn').disabled = !status.completed;
+    }
+
+    function updateSettingsUI() {
+      document.getElementById('processingEnabled').checked = aiSettings.processingEnabled;
+      document.getElementById('autoProcessEnabled').checked = aiSettings.autoProcessOnCapture;
+    }
+
+    function openSettingsModal() {
+      document.getElementById('settingsModal').classList.add('show');
+      document.getElementById('connectionStatus').innerHTML = '';
+      // Don't show the saved API key for security
+      document.getElementById('apiKeyInput').value = '';
+      document.getElementById('apiKeyInput').placeholder = aiSettings.hasApiKey ? 'API key saved (enter new to replace)' : 'r8_xxxxxxxxxxxx';
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settingsModal').classList.remove('show');
+    }
+
+    async function toggleProcessing() {
+      const enabled = document.getElementById('processingEnabled').checked;
+      await ipcRenderer.invoke('set-ai-settings', { processingEnabled: enabled });
+      aiSettings.processingEnabled = enabled;
+      updateProcessingIndicator(queueStatus);
+    }
+
+    async function toggleAutoProcess() {
+      const enabled = document.getElementById('autoProcessEnabled').checked;
+      await ipcRenderer.invoke('set-ai-settings', { autoProcessOnCapture: enabled });
+      aiSettings.autoProcessOnCapture = enabled;
+    }
+
+    async function testAndSaveApiKey() {
+      const apiKey = document.getElementById('apiKeyInput').value.trim();
+      const statusEl = document.getElementById('connectionStatus');
+
+      if (!apiKey && !aiSettings.hasApiKey) {
+        statusEl.innerHTML = '<div class="status-message error">Please enter an API key</div>';
+        return;
+      }
+
+      // If no new key entered but we have one saved, just close
+      if (!apiKey && aiSettings.hasApiKey) {
+        closeSettingsModal();
+        return;
+      }
+
+      statusEl.innerHTML = '<div class="status-message info">Testing connection...</div>';
+
+      try {
+        const result = await ipcRenderer.invoke('test-api-connection', apiKey);
+
+        if (result.success) {
+          // Save the API key
+          await ipcRenderer.invoke('set-ai-settings', { replicateApiKey: apiKey });
+          aiSettings.hasApiKey = true;
+          statusEl.innerHTML = '<div class="status-message success">Connected successfully! Settings saved.</div>';
+          updateProcessingIndicator(queueStatus);
+
+          setTimeout(() => closeSettingsModal(), 1500);
+        } else {
+          statusEl.innerHTML = `<div class="status-message error">Connection failed: ${result.error}</div>`;
+        }
+      } catch (err) {
+        statusEl.innerHTML = `<div class="status-message error">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function retryFailed() {
+      await ipcRenderer.invoke('retry-failed');
+      showToast('Retrying failed items...');
+    }
+
+    async function clearCompleted() {
+      await ipcRenderer.invoke('clear-completed');
+      showToast('Cleared completed items');
+    }
+
+    function openExternal(url) {
+      require('electron').shell.openExternal(url);
+    }
+
+    // Close modal on escape or clicking outside
+    document.getElementById('settingsModal').addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+        closeSettingsModal();
+      }
+    });
+
+    // Initialize AI settings
+    initAISettings();
   </script>
 </body>
 </html>

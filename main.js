@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const { autoUpdater } = require('electron-updater');
+const HeadshotProcessor = require('./processor');
+const ReplicateClient = require('./replicate');
 
 let mainWindow;
 let watcher;
@@ -10,6 +12,14 @@ let watchFolder = '';
 let outputFolder = '';
 let sessionsFile = '';
 let contactsFile = '';
+let processor = null;
+
+// AI Processing settings
+let aiSettings = {
+  replicateApiKey: '',
+  processingEnabled: true,
+  autoProcessOnCapture: true
+};
 
 // Generate unique shoot number in format YYYYMMDD-NNN
 function generateShootNumber() {
@@ -185,7 +195,15 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  
+
+  // Initialize the AI processor
+  processor = new HeadshotProcessor(app);
+  processor.onStatusUpdate = (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('processing-status', status);
+    }
+  };
+
   // Load saved settings
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   if (fs.existsSync(settingsPath)) {
@@ -195,6 +213,17 @@ function createWindow() {
       outputFolder = settings.outputFolder || '';
       sessionsFile = settings.sessionsFile || '';
       contactsFile = settings.contactsFile || '';
+
+      // Load AI settings
+      aiSettings.replicateApiKey = settings.replicateApiKey || '';
+      aiSettings.processingEnabled = settings.processingEnabled !== false;
+      aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture !== false;
+
+      // Configure processor with API key
+      if (aiSettings.replicateApiKey) {
+        processor.setApiKey(aiSettings.replicateApiKey);
+      }
+      processor.setProcessingEnabled(aiSettings.processingEnabled);
 
       // Ensure contacts.csv exists if outputFolder is set (for upgrades from older versions)
       if (outputFolder && fs.existsSync(outputFolder)) {
@@ -215,7 +244,7 @@ function createWindow() {
       console.log('Error loading settings:', e);
     }
   }
-  
+
   // Try to launch LUMIX Tether
   setTimeout(() => launchLumixTether(), 1000);
 }
@@ -269,9 +298,9 @@ ipcMain.handle('select-output-folder', async () => {
     sessionsFile = path.join(outputFolder, 'headshot_sessions.csv');
     contactsFile = path.join(outputFolder, 'contacts.csv');
 
-    // Create headshot_sessions.csv if it doesn't exist
+    // Create headshot_sessions.csv if it doesn't exist (with new processing columns)
     if (!fs.existsSync(sessionsFile)) {
-      fs.writeFileSync(sessionsFile, 'shoot_number,timestamp,first_name,last_name,email,mobile,company,original_filename,new_filename,original_path,new_path\n');
+      fs.writeFileSync(sessionsFile, 'shoot_number,timestamp,first_name,last_name,email,mobile,company,original_filename,new_filename,original_path,new_path,processing_status,enhanced_jpeg_path,enhanced_png_path,enhanced_square_jpg_path,enhanced_square_png_path,processing_timestamp\n');
     }
 
     // Create contacts.csv if it doesn't exist
@@ -290,6 +319,87 @@ ipcMain.handle('get-settings', () => {
   return { watchFolder, outputFolder, sessionsFile };
 });
 
+// AI Processing IPC Handlers
+
+// Get AI settings
+ipcMain.handle('get-ai-settings', () => {
+  return {
+    hasApiKey: !!aiSettings.replicateApiKey,
+    processingEnabled: aiSettings.processingEnabled,
+    autoProcessOnCapture: aiSettings.autoProcessOnCapture
+  };
+});
+
+// Set AI settings
+ipcMain.handle('set-ai-settings', async (event, settings) => {
+  if (settings.replicateApiKey !== undefined) {
+    aiSettings.replicateApiKey = settings.replicateApiKey;
+    if (processor) {
+      processor.setApiKey(settings.replicateApiKey);
+    }
+  }
+  if (settings.processingEnabled !== undefined) {
+    aiSettings.processingEnabled = settings.processingEnabled;
+    if (processor) {
+      processor.setProcessingEnabled(settings.processingEnabled);
+    }
+  }
+  if (settings.autoProcessOnCapture !== undefined) {
+    aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture;
+  }
+  saveSettings();
+  return { success: true };
+});
+
+// Test API connection
+ipcMain.handle('test-api-connection', async (event, apiKey) => {
+  const client = new ReplicateClient(apiKey || aiSettings.replicateApiKey);
+  return await client.testConnection();
+});
+
+// Get processing queue status
+ipcMain.handle('get-queue-status', () => {
+  if (processor) {
+    return processor.getStatus();
+  }
+  return {
+    queueLength: 0,
+    pending: 0,
+    processing: 0,
+    failed: 0,
+    completed: 0,
+    isProcessing: false,
+    hasApiKey: false,
+    processingEnabled: false
+  };
+});
+
+// Retry failed items
+ipcMain.handle('retry-failed', (event, itemId) => {
+  if (processor) {
+    if (itemId) {
+      processor.retryFailed(itemId);
+    } else {
+      processor.retryAllFailed();
+    }
+  }
+});
+
+// Get failed items
+ipcMain.handle('get-failed-items', () => {
+  if (processor) {
+    return processor.getFailedItems();
+  }
+  return [];
+});
+
+// Clear completed items
+ipcMain.handle('clear-completed', () => {
+  if (processor) {
+    processor.clearCompleted();
+  }
+});
+
 // Save a headshot session
 ipcMain.handle('save-session', async (event, data) => {
   const { firstName, lastName, email, mobile, company, shootNumber, originalFile } = data;
@@ -306,23 +416,38 @@ ipcMain.handle('save-session', async (event, data) => {
     fs.mkdirSync(personFolder, { recursive: true });
   }
 
-  // Count existing files to generate photo number
-  const existingFiles = fs.readdirSync(personFolder).filter(f => f.startsWith(shootNumber));
+  // Count existing files to generate photo number (only count RAW files to avoid double-counting)
+  const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
+  const existingFiles = fs.readdirSync(personFolder).filter(f => {
+    const fileExt = path.extname(f).toLowerCase();
+    return f.startsWith(shootNumber) && rawExtensions.includes(fileExt);
+  });
   const photoNum = String(existingFiles.length + 1).padStart(2, '0');
 
   // Generate new filename with shoot number prefix and photo counter
   const ext = path.extname(originalFile);
-  const newFileName = `${shootNumber}_${safeName}_${photoNum}${ext}`;
+  const baseName = `${shootNumber}_${safeName}_${photoNum}`;
+  const newFileName = `${baseName}${ext}`;
   const newFilePath = path.join(personFolder, newFileName);
 
   // Copy file to new location
   try {
     fs.copyFileSync(originalFile, newFilePath);
 
-    // Append to CSV (includes shoot_number and mobile)
+    // Append to CSV (includes shoot_number, mobile, and processing status)
     const originalFileName = path.basename(originalFile);
-    const csvLine = `"${shootNumber}","${new Date().toISOString()}","${firstName}","${lastName}","${email}","${mobile || ''}","${company || ''}","${originalFileName}","${newFileName}","${originalFile}","${newFilePath}"\n`;
+    const csvLine = `"${shootNumber}","${new Date().toISOString()}","${firstName}","${lastName}","${email}","${mobile || ''}","${company || ''}","${originalFileName}","${newFileName}","${originalFile}","${newFilePath}","pending","","","","",""\n`;
     fs.appendFileSync(sessionsFile, csvLine);
+
+    // Add to AI processing queue if enabled
+    if (aiSettings.autoProcessOnCapture && processor) {
+      processor.addToQueue({
+        sourcePath: newFilePath,
+        outputFolder: personFolder,
+        shootNumber: shootNumber,
+        baseName: baseName
+      });
+    }
 
     return { success: true, newPath: newFilePath, personFolder };
   } catch (err) {
@@ -405,5 +530,13 @@ function startWatcher() {
 
 function saveSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({ watchFolder, outputFolder, sessionsFile, contactsFile }));
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    watchFolder,
+    outputFolder,
+    sessionsFile,
+    contactsFile,
+    replicateApiKey: aiSettings.replicateApiKey,
+    processingEnabled: aiSettings.processingEnabled,
+    autoProcessOnCapture: aiSettings.autoProcessOnCapture
+  }));
 }
