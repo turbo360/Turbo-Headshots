@@ -309,26 +309,10 @@ class HeadshotProcessor {
       throw new Error('No output formats enabled. Enable at least Portrait or Square in settings.');
     }
 
-    // Create output subfolders for enabled output types only
-    const folders = {};
-    if (opts.outputPortrait) {
-      folders.portrait = path.join(outputFolder, '4x5');
-      if (opts.backgroundRemoval) {
-        folders.portraitTransparent = path.join(outputFolder, '4x5_transparent');
-      }
-    }
-    if (opts.outputSquare) {
-      folders.square = path.join(outputFolder, 'square');
-      if (opts.backgroundRemoval) {
-        folders.squareTransparent = path.join(outputFolder, 'square_transparent');
-      }
-    }
-
-    // Create subfolders
-    for (const folder of Object.values(folders)) {
-      if (!fs.existsSync(folder)) {
-        fs.mkdirSync(folder, { recursive: true });
-      }
+    // All processed files go directly into the person's folder (no subfolders)
+    // Files are distinguished by suffix: -4x5, -4x5-TP, -SQR, -SQR-TP
+    if (!fs.existsSync(outputFolder)) {
+      fs.mkdirSync(outputFolder, { recursive: true });
     }
 
     // Step 2: Detect face and calculate smart crop region
@@ -402,8 +386,8 @@ class HeadshotProcessor {
         }
       }
 
-      // Save final portrait JPEG
-      const finalPortraitPath = path.join(folders.portrait, `${baseName}.jpg`);
+      // Save final portrait JPEG with -4x5 suffix
+      const finalPortraitPath = path.join(outputFolder, `${baseName}-4x5.jpg`);
       if (portraitImagePath !== croppedPath) {
         fs.copyFileSync(portraitImagePath, finalPortraitPath);
       } else {
@@ -418,7 +402,8 @@ class HeadshotProcessor {
         if (!bgResult.success) {
           throw new Error(`Background removal failed: ${bgResult.error}`);
         }
-        const transparentPngPath = path.join(folders.portraitTransparent, `${baseName}.png`);
+        // Save with -4x5-TP suffix for transparent
+        const transparentPngPath = path.join(outputFolder, `${baseName}-4x5-TP.png`);
         const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
         if (!pngDownloadResult.success) {
           throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
@@ -428,7 +413,7 @@ class HeadshotProcessor {
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
           console.log(`Adding background color: ${opts.backgroundColor}`);
-          const coloredPath = path.join(folders.portrait, `${baseName}_colored.jpg`);
+          const coloredPath = path.join(outputFolder, `${baseName}-4x5-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentPngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
             results.coloredJpegPath = coloredPath;
@@ -500,8 +485,8 @@ class HeadshotProcessor {
         }
       }
 
-      // Save final square JPEG
-      const finalSquarePath = path.join(folders.square, `${baseName}.jpg`);
+      // Save final square JPEG with -SQR suffix
+      const finalSquarePath = path.join(outputFolder, `${baseName}-SQR.jpg`);
       if (squareImagePath !== squarePath) {
         fs.copyFileSync(squareImagePath, finalSquarePath);
       } else {
@@ -516,7 +501,8 @@ class HeadshotProcessor {
         if (!bgSquareResult.success) {
           throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
         }
-        const transparentSquarePngPath = path.join(folders.squareTransparent, `${baseName}.png`);
+        // Save with -SQR-TP suffix for transparent
+        const transparentSquarePngPath = path.join(outputFolder, `${baseName}-SQR-TP.png`);
         const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
         if (!squarePngDownloadResult.success) {
           throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
@@ -526,7 +512,7 @@ class HeadshotProcessor {
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
           console.log(`Adding background color (square): ${opts.backgroundColor}`);
-          const coloredPath = path.join(folders.square, `${baseName}_colored.jpg`);
+          const coloredPath = path.join(outputFolder, `${baseName}-SQR-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentSquarePngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
             results.coloredSquareJpegPath = coloredPath;
@@ -641,29 +627,35 @@ class HeadshotProcessor {
   async applySmartCropAndCorrection(inputPath, outputPath, faceData, aspectRatio) {
     const { imageWidth, imageHeight, faceCenterX, faceCenterY, estimatedFaceTop, estimatedFaceHeight } = faceData;
 
+    // Edge margin: stay this far from image edges to avoid backdrop corners
+    // 5% of the smaller dimension
+    const edgeMargin = Math.round(Math.min(imageWidth, imageHeight) * 0.05);
+
+    // Calculate safe crop area (excluding edge margins)
+    const safeWidth = imageWidth - (edgeMargin * 2);
+    const safeHeight = imageHeight - (edgeMargin * 2);
+
     // Calculate crop dimensions based on desired aspect ratio
-    // Use a larger multiplier to include more of the person and avoid cutting edges
+    // Tighter framing to avoid backdrop edges
     let cropHeight, cropWidth;
 
     if (aspectRatio >= 1) {
-      // Square - include head to chest
-      cropHeight = Math.min(estimatedFaceHeight * 3.5, imageHeight);
+      // Square - tighter crop for head to upper chest
+      cropHeight = Math.min(estimatedFaceHeight * 3.0, safeHeight);
       cropWidth = cropHeight * aspectRatio;
     } else {
-      // Portrait (like 4:5) - include more body/shoulders
-      cropHeight = Math.min(estimatedFaceHeight * 4, imageHeight);
+      // Portrait (like 4:5) - tighter crop for head to chest/shoulders
+      cropHeight = Math.min(estimatedFaceHeight * 3.5, safeHeight);
       cropWidth = cropHeight * aspectRatio;
     }
 
-    // Ensure crop doesn't exceed image bounds - scale down proportionally if needed
-    if (cropWidth > imageWidth) {
-      const scale = imageWidth / cropWidth;
-      cropWidth = imageWidth;
+    // Ensure crop fits within safe area
+    if (cropWidth > safeWidth) {
+      cropWidth = safeWidth;
       cropHeight = cropWidth / aspectRatio;
     }
-    if (cropHeight > imageHeight) {
-      const scale = imageHeight / cropHeight;
-      cropHeight = imageHeight;
+    if (cropHeight > safeHeight) {
+      cropHeight = safeHeight;
       cropWidth = cropHeight * aspectRatio;
     }
 
@@ -682,21 +674,24 @@ class HeadshotProcessor {
 
     let cropY = Math.round(faceCenterY - targetFacePositionY);
 
-    // Clamp to image bounds while trying to maintain centering
-    // If we hit a boundary, adjust but log a warning
-    if (cropX < 0) {
-      console.log(`Warning: Face near left edge, adjusting crop`);
-      cropX = 0;
-    } else if (cropX + cropWidth > imageWidth) {
-      console.log(`Warning: Face near right edge, adjusting crop`);
-      cropX = imageWidth - cropWidth;
+    // Clamp to safe bounds (with edge margin) to avoid backdrop corners
+    if (cropX < edgeMargin) {
+      console.log(`Adjusting crop to avoid left edge`);
+      cropX = edgeMargin;
+    } else if (cropX + cropWidth > imageWidth - edgeMargin) {
+      console.log(`Adjusting crop to avoid right edge`);
+      cropX = imageWidth - edgeMargin - cropWidth;
     }
 
-    if (cropY < 0) {
-      cropY = 0;
-    } else if (cropY + cropHeight > imageHeight) {
-      cropY = imageHeight - cropHeight;
+    if (cropY < edgeMargin) {
+      cropY = edgeMargin;
+    } else if (cropY + cropHeight > imageHeight - edgeMargin) {
+      cropY = imageHeight - edgeMargin - cropHeight;
     }
+
+    // Final safety check - ensure we're within actual image bounds
+    cropX = Math.max(0, Math.min(cropX, imageWidth - cropWidth));
+    cropY = Math.max(0, Math.min(cropY, imageHeight - cropHeight));
 
     console.log(`Cropping: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) - face center: (${Math.round(faceCenterX)}, ${Math.round(faceCenterY)}) - aspect ratio: ${aspectRatio}`);
 
