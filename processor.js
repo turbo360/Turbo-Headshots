@@ -767,58 +767,91 @@ class HeadshotProcessor {
   }
 
   /**
-   * Calculate white balance correction using gray world algorithm
-   * Assumes the average color of the image should be neutral gray
+   * Calculate white balance correction using highlights-based algorithm
+   * Uses the brightest pixels as white reference - better for studio photos with white backdrops
+   * Only corrects color temperature, preserves brightness
    */
   async calculateWhiteBalance(imagePath) {
     try {
-      // Get image statistics for white balance calculation
-      const { channels, dominant } = await sharp(imagePath)
+      // Get image data for white balance calculation
+      const { data, info } = await sharp(imagePath)
         .rotate() // Apply EXIF orientation first
         .resize(200, 200, { fit: 'inside' }) // Downsample for faster processing
         .raw()
-        .toBuffer({ resolveWithObject: true })
-        .then(async ({ data, info }) => {
-          const { width, height, channels } = info;
-          const pixelCount = width * height;
+        .toBuffer({ resolveWithObject: true });
 
-          // Calculate average RGB values
-          let rSum = 0, gSum = 0, bSum = 0;
-          for (let i = 0; i < data.length; i += channels) {
-            rSum += data[i];
-            gSum += data[i + 1];
-            bSum += data[i + 2];
-          }
+      const { width, height, channels: numChannels } = info;
+      const pixelCount = width * height;
 
-          const rAvg = rSum / pixelCount;
-          const gAvg = gSum / pixelCount;
-          const bAvg = bSum / pixelCount;
+      // Collect pixel data and find highlights (brightest 10% of pixels)
+      const pixels = [];
+      for (let i = 0; i < data.length; i += numChannels) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+        pixels.push({ r, g, b, luminance });
+      }
 
-          return {
-            channels: { r: rAvg, g: gAvg, b: bAvg },
-            dominant: (rAvg + gAvg + bAvg) / 3
-          };
-        });
+      // Sort by luminance and get the brightest 10%
+      pixels.sort((a, b) => b.luminance - a.luminance);
+      const highlightCount = Math.max(10, Math.floor(pixelCount * 0.1));
+      const highlights = pixels.slice(0, highlightCount);
 
-      // Calculate correction factors (gray world algorithm)
-      // Target is to make average color neutral (equal R, G, B)
-      const gray = dominant;
-      let rFactor = gray / channels.r;
-      let gFactor = gray / channels.g;
-      let bFactor = gray / channels.b;
+      // Calculate average of highlights (these should be white/near-white)
+      let hR = 0, hG = 0, hB = 0;
+      for (const p of highlights) {
+        hR += p.r;
+        hG += p.g;
+        hB += p.b;
+      }
+      hR /= highlightCount;
+      hG /= highlightCount;
+      hB /= highlightCount;
 
-      // Limit correction to avoid over-correction (max 30% adjustment)
-      const maxCorrection = 1.3;
-      const minCorrection = 0.7;
+      // Check if highlights are already close to white (neutral)
+      const maxChannel = Math.max(hR, hG, hB);
+      const highlightBrightness = (hR + hG + hB) / 3;
+
+      // If the image is very bright overall (white background), apply minimal correction
+      if (highlightBrightness > 220) {
+        console.log(`White balance: Bright image detected (${highlightBrightness.toFixed(0)}), minimal correction`);
+        // Only correct slight color casts, don't change brightness
+        let rFactor = maxChannel / hR;
+        let gFactor = maxChannel / hG;
+        let bFactor = maxChannel / hB;
+
+        // Very conservative limits for bright images (max 5% adjustment)
+        const maxAdj = 1.05;
+        const minAdj = 0.95;
+        rFactor = Math.max(minAdj, Math.min(maxAdj, rFactor));
+        gFactor = Math.max(minAdj, Math.min(maxAdj, gFactor));
+        bFactor = Math.max(minAdj, Math.min(maxAdj, bFactor));
+
+        console.log(`White balance correction: R=${rFactor.toFixed(3)}, G=${gFactor.toFixed(3)}, B=${bFactor.toFixed(3)}`);
+
+        return {
+          matrix: [
+            [rFactor, 0, 0],
+            [0, gFactor, 0],
+            [0, 0, bFactor]
+          ],
+          factors: { r: rFactor, g: gFactor, b: bFactor }
+        };
+      }
+
+      // For darker images, apply standard highlight-based correction
+      // Target: make highlights neutral (equal R, G, B at max brightness)
+      let rFactor = maxChannel / hR;
+      let gFactor = maxChannel / hG;
+      let bFactor = maxChannel / hB;
+
+      // Limit correction (max 15% adjustment)
+      const maxCorrection = 1.15;
+      const minCorrection = 0.85;
       rFactor = Math.max(minCorrection, Math.min(maxCorrection, rFactor));
       gFactor = Math.max(minCorrection, Math.min(maxCorrection, gFactor));
       bFactor = Math.max(minCorrection, Math.min(maxCorrection, bFactor));
-
-      // Normalize so green channel stays at 1.0 (standard reference)
-      const normFactor = 1 / gFactor;
-      rFactor *= normFactor;
-      gFactor = 1.0;
-      bFactor *= normFactor;
 
       console.log(`White balance correction: R=${rFactor.toFixed(3)}, G=${gFactor.toFixed(3)}, B=${bFactor.toFixed(3)}`);
 
