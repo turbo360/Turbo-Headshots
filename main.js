@@ -400,6 +400,114 @@ ipcMain.handle('clear-completed', () => {
   }
 });
 
+// Get list of existing session folders for reprocessing
+ipcMain.handle('get-session-folders', () => {
+  if (!outputFolder || !fs.existsSync(outputFolder)) {
+    return [];
+  }
+
+  const folders = fs.readdirSync(outputFolder, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory())
+    .map(dirent => {
+      const folderPath = path.join(outputFolder, dirent.name);
+      const files = fs.readdirSync(folderPath);
+
+      // Count RAW and processed files
+      const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
+      const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+      const processedJpgs = files.filter(f => f.endsWith('.jpg') && !f.includes('_temp') && !f.includes('_corrected'));
+      const processedPngs = files.filter(f => f.endsWith('.png'));
+
+      // Parse folder name for shoot number and name
+      const match = dirent.name.match(/^(\d{8}-\d{3})_(.+)$/);
+
+      return {
+        name: dirent.name,
+        path: folderPath,
+        shootNumber: match ? match[1] : dirent.name,
+        personName: match ? match[2].replace(/_/g, ' ') : dirent.name,
+        rawCount: rawFiles.length,
+        processedCount: processedJpgs.length,
+        hasTransparent: processedPngs.length > 0,
+        needsProcessing: rawFiles.length > 0 && processedJpgs.length < rawFiles.length
+      };
+    })
+    .filter(f => f.rawCount > 0) // Only show folders with photos
+    .sort((a, b) => b.shootNumber.localeCompare(a.shootNumber)); // Newest first
+
+  return folders;
+});
+
+// Reprocess an existing session folder
+ipcMain.handle('reprocess-folder', async (event, folderPath) => {
+  if (!processor) {
+    return { success: false, error: 'Processor not initialized' };
+  }
+
+  if (!fs.existsSync(folderPath)) {
+    return { success: false, error: 'Folder not found' };
+  }
+
+  const folderName = path.basename(folderPath);
+  const match = folderName.match(/^(\d{8}-\d{3})_(.+)$/);
+  const shootNumber = match ? match[1] : folderName;
+
+  // Find all RAW/JPEG files that haven't been processed yet
+  const files = fs.readdirSync(folderPath);
+  const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
+  const jpegExtensions = ['.jpg', '.jpeg'];
+
+  // Get RAW files
+  const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+
+  let queuedCount = 0;
+
+  for (const rawFile of rawFiles) {
+    const baseName = path.basename(rawFile, path.extname(rawFile));
+    const sourcePath = path.join(folderPath, rawFile);
+
+    // Check if already processed (has corresponding .jpg that's not the source)
+    const hasProcessedJpg = files.some(f =>
+      f === `${baseName}.jpg` && !jpegExtensions.includes(path.extname(rawFile).toLowerCase())
+    );
+
+    // Skip if already has processed outputs
+    if (hasProcessedJpg && files.includes(`${baseName}.png`)) {
+      continue;
+    }
+
+    // Add to processing queue
+    processor.addToQueue({
+      sourcePath: sourcePath,
+      outputFolder: folderPath,
+      shootNumber: shootNumber,
+      baseName: baseName
+    });
+    queuedCount++;
+  }
+
+  return {
+    success: true,
+    queued: queuedCount,
+    message: queuedCount > 0 ? `Added ${queuedCount} photo(s) to processing queue` : 'All photos already processed'
+  };
+});
+
+// Select and reprocess a folder via dialog
+ipcMain.handle('select-folder-to-reprocess', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    defaultPath: outputFolder,
+    title: 'Select Session Folder to Reprocess',
+    message: 'Choose a headshot session folder to add to processing queue'
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
 // Save a headshot session
 ipcMain.handle('save-session', async (event, data) => {
   const { firstName, lastName, email, mobile, company, shootNumber, originalFile } = data;

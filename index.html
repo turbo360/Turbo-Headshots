@@ -233,6 +233,33 @@
 
     /* Cost estimate */
     .cost-estimate { margin-top: 15px; padding: 10px 15px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 0.85em; color: #888; }
+
+    /* Highlight button */
+    .btn-small.btn-highlight { background: rgba(200, 50, 50, 0.3); border: 1px solid rgba(200, 50, 50, 0.5); }
+    .btn-small.btn-highlight:hover { background: rgba(200, 50, 50, 0.5); }
+
+    /* Session folder list */
+    .session-folder-list { max-height: 400px; overflow-y: auto; margin-bottom: 15px; }
+    .session-folder-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 15px; background: rgba(255,255,255,0.05); border-radius: 8px;
+      margin-bottom: 8px; cursor: pointer; transition: background 0.2s;
+    }
+    .session-folder-item:hover { background: rgba(255,255,255,0.1); }
+    .session-folder-item .info { flex: 1; }
+    .session-folder-item .name { font-weight: 500; margin-bottom: 3px; }
+    .session-folder-item .details { font-size: 0.8em; color: #888; }
+    .session-folder-item .status-badge {
+      padding: 4px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 500;
+    }
+    .session-folder-item .status-badge.needs-processing { background: rgba(252, 196, 25, 0.2); color: #fcc419; }
+    .session-folder-item .status-badge.processed { background: rgba(81, 207, 102, 0.2); color: #51cf66; }
+    .session-folder-item .btn-reprocess {
+      padding: 6px 12px; background: rgba(200, 50, 50, 0.3); border: none;
+      border-radius: 6px; color: #fff; font-size: 0.8em; cursor: pointer; margin-left: 10px;
+    }
+    .session-folder-item .btn-reprocess:hover { background: rgba(200, 50, 50, 0.5); }
+    .session-folder-item .btn-reprocess:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -353,6 +380,7 @@
         </div>
       </div>
       <div class="queue-actions">
+        <button class="btn-small btn-highlight" onclick="openReprocessModal()">Reprocess Existing</button>
         <button class="btn-small" id="retryFailedBtn" onclick="retryFailed()" disabled>Retry Failed</button>
         <button class="btn-small" id="clearCompletedBtn" onclick="clearCompleted()" disabled>Clear Completed</button>
         <button class="btn-small" onclick="openSettingsModal()">Settings</button>
@@ -363,6 +391,23 @@
     </div>
   </div>
   
+  <!-- Reprocess Modal -->
+  <div class="modal-overlay" id="reprocessModal">
+    <div class="modal" style="max-width: 600px;">
+      <h2>Reprocess Existing Sessions</h2>
+      <p style="color: #888; margin-bottom: 20px;">Select a session folder to add its photos to the AI enhancement queue.</p>
+
+      <div id="sessionFolderList" class="session-folder-list">
+        <div class="empty-state">Loading sessions...</div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeReprocessModal()">Close</button>
+        <button class="btn-secondary" onclick="selectCustomFolder()">Browse Other Folder...</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings Modal -->
   <div class="modal-overlay" id="settingsModal">
     <div class="modal">
@@ -880,6 +925,79 @@
         closeSettingsModal();
       }
     });
+
+    document.getElementById('reprocessModal').addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+        closeReprocessModal();
+      }
+    });
+
+    // Reprocess Modal Functions
+    async function openReprocessModal() {
+      document.getElementById('reprocessModal').classList.add('show');
+      document.getElementById('sessionFolderList').innerHTML = '<div class="empty-state">Loading sessions...</div>';
+
+      try {
+        const folders = await ipcRenderer.invoke('get-session-folders');
+
+        if (folders.length === 0) {
+          document.getElementById('sessionFolderList').innerHTML = '<div class="empty-state">No session folders found</div>';
+          return;
+        }
+
+        document.getElementById('sessionFolderList').innerHTML = folders.map(f => `
+          <div class="session-folder-item">
+            <div class="info">
+              <div class="name">${f.shootNumber} - ${f.personName}</div>
+              <div class="details">${f.rawCount} photo(s) | ${f.processedCount} processed</div>
+            </div>
+            <span class="status-badge ${f.needsProcessing ? 'needs-processing' : 'processed'}">
+              ${f.needsProcessing ? 'Needs Processing' : 'Processed'}
+            </span>
+            <button class="btn-reprocess" onclick="reprocessFolder('${f.path.replace(/'/g, "\\'")}')">
+              ${f.needsProcessing ? 'Process' : 'Reprocess'}
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        document.getElementById('sessionFolderList').innerHTML = `<div class="empty-state">Error loading folders: ${err.message}</div>`;
+      }
+    }
+
+    function closeReprocessModal() {
+      document.getElementById('reprocessModal').classList.remove('show');
+    }
+
+    async function reprocessFolder(folderPath) {
+      try {
+        const result = await ipcRenderer.invoke('reprocess-folder', folderPath);
+
+        if (result.success) {
+          showToast(result.message);
+          if (result.queued > 0) {
+            closeReprocessModal();
+          } else {
+            // Refresh the list to show updated status
+            openReprocessModal();
+          }
+        } else {
+          showToast('Error: ' + result.error, true);
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, true);
+      }
+    }
+
+    async function selectCustomFolder() {
+      try {
+        const folderPath = await ipcRenderer.invoke('select-folder-to-reprocess');
+        if (folderPath) {
+          await reprocessFolder(folderPath);
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, true);
+      }
+    }
 
     // Initialize AI settings
     initAISettings();
