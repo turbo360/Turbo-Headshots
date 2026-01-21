@@ -779,7 +779,7 @@ class HeadshotProcessor {
         .recomb(whiteBalanceCorrection.matrix) // Apply white balance correction
         .modulate({
           saturation: 1.05,  // Subtle saturation boost
-          brightness: 1.01
+          brightness: 1.08   // Brighten slightly for better exposure
         })
         .sharpen({
           sigma: 0.8,
