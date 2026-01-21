@@ -260,6 +260,14 @@
     }
     .session-folder-item .btn-reprocess:hover { background: rgba(200, 50, 50, 0.5); }
     .session-folder-item .btn-reprocess:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Failed items list */
+    .failed-item {
+      background: rgba(255, 107, 107, 0.1); border: 1px solid rgba(255, 107, 107, 0.3);
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 0.85em;
+    }
+    .failed-item .name { font-weight: 500; color: #fff; margin-bottom: 4px; }
+    .failed-item .error { color: #ff6b6b; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -370,9 +378,9 @@
           <div class="value" id="queueProcessing">0</div>
           <div class="label">Processing</div>
         </div>
-        <div class="queue-stat failed">
+        <div class="queue-stat failed" onclick="toggleFailedDetails()" style="cursor: pointer;">
           <div class="value" id="queueFailed">0</div>
-          <div class="label">Failed</div>
+          <div class="label">Failed (click)</div>
         </div>
         <div class="queue-stat completed">
           <div class="value" id="queueCompleted">0</div>
@@ -387,6 +395,12 @@
       </div>
       <div class="cost-estimate" id="costEstimate">
         Estimated cost: ~$0.02 per photo (background removal + face enhancement)
+      </div>
+
+      <!-- Failed Items Details -->
+      <div id="failedItemsSection" style="display: none; margin-top: 15px;">
+        <h4 style="color: #ff6b6b; margin-bottom: 10px;">Failed Items</h4>
+        <div id="failedItemsList" style="max-height: 200px; overflow-y: auto;"></div>
       </div>
     </div>
   </div>
@@ -996,6 +1010,38 @@
         }
       } catch (err) {
         showToast('Error: ' + err.message, true);
+      }
+    }
+
+    // Failed items display
+    async function toggleFailedDetails() {
+      const section = document.getElementById('failedItemsSection');
+      if (section.style.display === 'none') {
+        await loadFailedItems();
+        section.style.display = 'block';
+      } else {
+        section.style.display = 'none';
+      }
+    }
+
+    async function loadFailedItems() {
+      try {
+        const items = await ipcRenderer.invoke('get-failed-items');
+        const list = document.getElementById('failedItemsList');
+
+        if (items.length === 0) {
+          list.innerHTML = '<div style="color: #888;">No failed items</div>';
+          return;
+        }
+
+        list.innerHTML = items.map(item => `
+          <div class="failed-item">
+            <div class="name">${item.baseName || item.shootNumber}</div>
+            <div class="error">${item.error || 'Unknown error'}</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('Error loading failed items:', err);
       }
     }
 

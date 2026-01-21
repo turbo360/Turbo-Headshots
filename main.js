@@ -332,8 +332,11 @@ ipcMain.handle('get-ai-settings', () => {
 
 // Set AI settings
 ipcMain.handle('set-ai-settings', async (event, settings) => {
+  console.log('set-ai-settings called with:', JSON.stringify(settings));
+
   if (settings.replicateApiKey !== undefined) {
     aiSettings.replicateApiKey = settings.replicateApiKey;
+    console.log('API key set, length:', settings.replicateApiKey.length);
     if (processor) {
       processor.setApiKey(settings.replicateApiKey);
     }
@@ -347,7 +350,14 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   if (settings.autoProcessOnCapture !== undefined) {
     aiSettings.autoProcessOnCapture = settings.autoProcessOnCapture;
   }
+
   saveSettings();
+  console.log('Settings saved. Current aiSettings:', JSON.stringify({
+    hasKey: !!aiSettings.replicateApiKey,
+    keyLength: aiSettings.replicateApiKey?.length,
+    processingEnabled: aiSettings.processingEnabled
+  }));
+
   return { success: true };
 });
 
@@ -638,7 +648,7 @@ function startWatcher() {
 
 function saveSettings() {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({
+  const settingsData = {
     watchFolder,
     outputFolder,
     sessionsFile,
@@ -646,5 +656,9 @@ function saveSettings() {
     replicateApiKey: aiSettings.replicateApiKey,
     processingEnabled: aiSettings.processingEnabled,
     autoProcessOnCapture: aiSettings.autoProcessOnCapture
-  }));
+  };
+  console.log('Saving settings to:', settingsPath);
+  console.log('API key length being saved:', aiSettings.replicateApiKey?.length || 0);
+  fs.writeFileSync(settingsPath, JSON.stringify(settingsData));
+  console.log('Settings saved successfully');
 }
