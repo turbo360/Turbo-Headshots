@@ -16,9 +16,13 @@ class ReplicateClient {
     this.apiKey = apiKey;
     this.baseUrl = 'https://api.replicate.com/v1';
     this.models = {
-      backgroundRemoval: 'lucataco/remove-bg:95fcc2a26d3899cd6c2691c900465aaeff466285a65c14638cc5f36f34befaf1',
-      faceRestoration: 'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c'
+      // Using rembg with u2net model - better for hair and fine edges
+      backgroundRemoval: 'cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
+      // CodeFormer with high fidelity - preserves natural look while fixing minor issues
+      faceRestoration: 'sczhou/codeformer:7de2ea26c616d5bf2245ad0d5e24f0ff9a6204578a5c876db53142edd9d2cd56'
     };
+    // Fidelity: 0 = more enhancement, 1 = more original. Use 0.7 for subtle touch-ups
+    this.faceRestorationFidelity = 0.7;
   }
 
   /**
@@ -139,7 +143,8 @@ class ReplicateClient {
   }
 
   /**
-   * Enhance face using GFPGAN
+   * Enhance face using CodeFormer
+   * Uses high fidelity setting to preserve natural appearance
    * Returns URL to enhanced image
    */
   async enhanceFace(imagePath) {
@@ -151,9 +156,13 @@ class ReplicateClient {
         {
           version: this.models.faceRestoration.split(':')[1],
           input: {
-            img: imageUri,
-            version: 'v1.4',
-            scale: 2
+            image: imageUri,
+            upscale: 2,
+            face_upsample: true,
+            background_enhance: false,
+            // High fidelity (0.7) = subtle touch-ups, preserves natural look
+            // Lower values = more aggressive enhancement
+            codeformer_fidelity: this.faceRestorationFidelity
           }
         },
         {

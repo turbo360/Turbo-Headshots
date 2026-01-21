@@ -420,75 +420,81 @@ class HeadshotProcessor {
 
   /**
    * Apply smart crop with proper headshot framing and color correction
+   * Ensures person is centered horizontally in the frame
    */
   async applySmartCropAndCorrection(inputPath, outputPath, faceData, aspectRatio) {
     const { imageWidth, imageHeight, faceCenterX, faceCenterY, estimatedFaceTop, estimatedFaceHeight } = faceData;
 
     // Calculate crop dimensions based on desired aspect ratio
-    let cropWidth, cropHeight;
+    // Use a larger multiplier to include more of the person and avoid cutting edges
+    let cropHeight, cropWidth;
 
     if (aspectRatio >= 1) {
-      // Square or landscape - base on face height with proper framing
-      // For headshots, we want face to be about 50-60% of frame height
-      cropHeight = Math.min(estimatedFaceHeight * 2.5, imageHeight);
+      // Square - include head to chest
+      cropHeight = Math.min(estimatedFaceHeight * 3.5, imageHeight);
       cropWidth = cropHeight * aspectRatio;
     } else {
-      // Portrait (like 4:5) - taller than wide
-      // Include more body/shoulders
-      cropHeight = Math.min(estimatedFaceHeight * 3, imageHeight);
+      // Portrait (like 4:5) - include more body/shoulders
+      cropHeight = Math.min(estimatedFaceHeight * 4, imageHeight);
       cropWidth = cropHeight * aspectRatio;
     }
 
-    // Ensure crop doesn't exceed image bounds
-    cropWidth = Math.min(cropWidth, imageWidth);
-    cropHeight = Math.min(cropHeight, imageHeight);
-
-    // If aspect ratio requires it, adjust
-    if (cropWidth / cropHeight !== aspectRatio) {
-      if (cropWidth / cropHeight > aspectRatio) {
-        cropWidth = cropHeight * aspectRatio;
-      } else {
-        cropHeight = cropWidth / aspectRatio;
-      }
+    // Ensure crop doesn't exceed image bounds - scale down proportionally if needed
+    if (cropWidth > imageWidth) {
+      const scale = imageWidth / cropWidth;
+      cropWidth = imageWidth;
+      cropHeight = cropWidth / aspectRatio;
+    }
+    if (cropHeight > imageHeight) {
+      const scale = imageHeight / cropHeight;
+      cropHeight = imageHeight;
+      cropWidth = cropHeight * aspectRatio;
     }
 
-    // Position the crop so face is properly framed
-    // Face should be in upper portion of frame (around 30-40% from top for headshots)
-    const targetFacePositionY = aspectRatio === 1
-      ? cropHeight * 0.38  // For square, face slightly above center
-      : cropHeight * FACE_POSITION_FROM_TOP; // For portrait, face in upper third
-
-    // Calculate crop position
-    let cropX = Math.round(faceCenterX - cropWidth / 2);
-    let cropY = Math.round(faceCenterY - targetFacePositionY);
-
-    // Ensure minimum headroom
-    const minHeadroom = cropHeight * MIN_HEAD_ROOM;
-    if (estimatedFaceTop - cropY < minHeadroom) {
-      cropY = Math.round(estimatedFaceTop - minHeadroom);
-    }
-
-    // Clamp to image bounds
-    cropX = Math.max(0, Math.min(cropX, imageWidth - cropWidth));
-    cropY = Math.max(0, Math.min(cropY, imageHeight - cropHeight));
-
-    // Round dimensions to integers
+    // Round dimensions
     cropWidth = Math.round(cropWidth);
     cropHeight = Math.round(cropHeight);
 
-    console.log(`Cropping: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) - aspect ratio: ${aspectRatio}`);
+    // HORIZONTAL: Center crop on the face center - this is the priority
+    let cropX = Math.round(faceCenterX - cropWidth / 2);
+
+    // VERTICAL: Position face in upper portion of frame
+    // For headshots, face should be around 30-35% from top
+    const targetFacePositionY = aspectRatio === 1
+      ? cropHeight * 0.35  // For square, face in upper third
+      : cropHeight * 0.30; // For portrait, face higher up
+
+    let cropY = Math.round(faceCenterY - targetFacePositionY);
+
+    // Clamp to image bounds while trying to maintain centering
+    // If we hit a boundary, adjust but log a warning
+    if (cropX < 0) {
+      console.log(`Warning: Face near left edge, adjusting crop`);
+      cropX = 0;
+    } else if (cropX + cropWidth > imageWidth) {
+      console.log(`Warning: Face near right edge, adjusting crop`);
+      cropX = imageWidth - cropWidth;
+    }
+
+    if (cropY < 0) {
+      cropY = 0;
+    } else if (cropY + cropHeight > imageHeight) {
+      cropY = imageHeight - cropHeight;
+    }
+
+    console.log(`Cropping: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) - face center: (${Math.round(faceCenterX)}, ${Math.round(faceCenterY)}) - aspect ratio: ${aspectRatio}`);
 
     // Apply crop and color correction
     await sharp(inputPath)
       .extract({
-        left: Math.round(cropX),
-        top: Math.round(cropY),
+        left: cropX,
+        top: cropY,
         width: cropWidth,
         height: cropHeight
       })
       .normalize() // Auto white balance / histogram stretch
       .modulate({
-        saturation: 1.1,
+        saturation: 1.08,  // Slightly reduced saturation boost
         brightness: 1.02
       })
       .sharpen({
