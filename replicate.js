@@ -6,6 +6,10 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
+
+// Max dimension for images sent to API (larger images are resized)
+const MAX_API_IMAGE_DIMENSION = 2048;
 
 class ReplicateClient {
   constructor(apiKey) {
@@ -36,10 +40,27 @@ class ReplicateClient {
   }
 
   /**
-   * Convert image file to base64 data URI
+   * Convert image file to base64 data URI, resizing if too large
    */
   async imageToDataUri(imagePath) {
-    const buffer = fs.readFileSync(imagePath);
+    // Check image dimensions
+    const metadata = await sharp(imagePath).metadata();
+    let buffer;
+
+    if (metadata.width > MAX_API_IMAGE_DIMENSION || metadata.height > MAX_API_IMAGE_DIMENSION) {
+      // Resize large images to speed up API processing
+      console.log(`Resizing image from ${metadata.width}x${metadata.height} to max ${MAX_API_IMAGE_DIMENSION}px for API`);
+      buffer = await sharp(imagePath)
+        .resize(MAX_API_IMAGE_DIMENSION, MAX_API_IMAGE_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .jpeg({ quality: 92 })
+        .toBuffer();
+    } else {
+      buffer = fs.readFileSync(imagePath);
+    }
+
     const base64 = buffer.toString('base64');
     const ext = path.extname(imagePath).toLowerCase();
     const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
@@ -49,7 +70,7 @@ class ReplicateClient {
   /**
    * Wait for prediction to complete
    */
-  async waitForPrediction(predictionUrl, maxAttempts = 120) {
+  async waitForPrediction(predictionUrl, maxAttempts = 300) {
     for (let i = 0; i < maxAttempts; i++) {
       const response = await axios.get(predictionUrl, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
@@ -68,11 +89,16 @@ class ReplicateClient {
         };
       }
 
+      // Log progress every 10 seconds
+      if (i > 0 && i % 20 === 0) {
+        console.log(`Still waiting for API response... (${i / 2}s)`);
+      }
+
       // Wait 500ms before polling again
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    return { success: false, error: 'Timeout waiting for prediction' };
+    return { success: false, error: 'Timeout waiting for prediction (150s)' };
   }
 
   /**
