@@ -214,6 +214,11 @@ function createWindow() {
       mainWindow.webContents.send('processing-status', status);
     }
   };
+  processor.onLogMessage = (logData) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('processing-log', logData);
+    }
+  };
 
   // Load saved settings
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');

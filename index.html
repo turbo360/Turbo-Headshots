@@ -311,6 +311,23 @@
       margin: 20px 0 15px 0; font-size: 1em; color: #aaa;
       border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;
     }
+
+    /* Processing Log */
+    .processing-log {
+      background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px;
+      font-family: 'Monaco', 'Menlo', monospace; font-size: 0.75em;
+      max-height: 200px; overflow-y: auto; color: #aaa;
+    }
+    .processing-log .log-entry {
+      padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .processing-log .log-entry:last-child { border-bottom: none; }
+    .processing-log .log-time { color: #666; margin-right: 8px; }
+    .processing-log .log-info { color: #6a89cc; }
+    .processing-log .log-success { color: #51cf66; }
+    .processing-log .log-warning { color: #fcc419; }
+    .processing-log .log-error { color: #ff6b6b; }
+    .processing-log .log-step { color: #c083e0; }
   </style>
 </head>
 <body>
@@ -446,6 +463,15 @@
       <div id="failedItemsSection" style="display: none; margin-top: 15px;">
         <h4 style="color: #ff6b6b; margin-bottom: 10px;">Failed Items</h4>
         <div id="failedItemsList" style="max-height: 200px; overflow-y: auto;"></div>
+      </div>
+
+      <!-- Processing Log -->
+      <div class="processing-log-section" style="margin-top: 15px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <h4 style="color: #aaa; font-size: 0.9em;">Processing Log</h4>
+          <button class="btn-small" onclick="clearProcessingLog()" style="padding: 4px 10px; font-size: 0.75em;">Clear</button>
+        </div>
+        <div id="processingLog" class="processing-log"></div>
       </div>
     </div>
   </div>
@@ -1245,6 +1271,36 @@
         console.error('Error loading failed items:', err);
       }
     }
+
+    // Processing Log Functions
+    const maxLogEntries = 100;
+
+    function addLogEntry(message, type = 'info') {
+      const log = document.getElementById('processingLog');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span class="log-time">${time}</span><span class="log-${type}">${message}</span>`;
+      log.appendChild(entry);
+
+      // Keep only last N entries
+      while (log.children.length > maxLogEntries) {
+        log.removeChild(log.firstChild);
+      }
+
+      // Auto-scroll to bottom
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function clearProcessingLog() {
+      document.getElementById('processingLog').innerHTML = '';
+      addLogEntry('Log cleared', 'info');
+    }
+
+    // Listen for log messages from main process
+    ipcRenderer.on('processing-log', (event, data) => {
+      addLogEntry(data.message, data.type || 'info');
+    });
 
     // Initialize AI settings
     initAISettings();

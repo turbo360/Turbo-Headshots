@@ -26,6 +26,7 @@ class HeadshotProcessor {
     this.processingEnabled = true;
     this.maxRetries = 3;
     this.onStatusUpdate = null; // Callback for UI updates
+    this.onLogMessage = null;   // Callback for log messages to UI
     this.watchFolder = null; // Set by main.js for JPEG fallback lookup
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
     this.stopRequested = false; // Flag to stop processing after current item
@@ -179,6 +180,18 @@ class HeadshotProcessor {
   }
 
   /**
+   * Send log message to UI
+   * @param {string} message - Log message
+   * @param {string} type - 'info', 'success', 'warning', 'error', 'step'
+   */
+  log(message, type = 'info') {
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    if (this.onLogMessage) {
+      this.onLogMessage({ message, type });
+    }
+  }
+
+  /**
    * Process the next item in the queue
    */
   async processNext() {
@@ -198,10 +211,14 @@ class HeadshotProcessor {
     this.saveQueue();
     this.notifyStatusUpdate();
 
+    const pendingCount = this.queue.filter(i => i.status === 'pending').length;
+    this.log(`Starting: ${nextItem.baseName} (${pendingCount} remaining in queue)`, 'info');
+
     try {
       await this.processHeadshot(nextItem);
       nextItem.status = 'completed';
       nextItem.completedAt = new Date().toISOString();
+      this.log(`Completed: ${nextItem.baseName}`, 'success');
     } catch (error) {
       console.error('Processing error:', error);
       nextItem.error = error.message;
@@ -209,8 +226,10 @@ class HeadshotProcessor {
 
       if (nextItem.retries >= this.maxRetries) {
         nextItem.status = 'failed';
+        this.log(`Failed: ${nextItem.baseName} - ${error.message}`, 'error');
       } else {
         nextItem.status = 'pending';
+        this.log(`Retry ${nextItem.retries}/${this.maxRetries}: ${nextItem.baseName} - ${error.message}`, 'warning');
         // Exponential backoff
         await new Promise(resolve =>
           setTimeout(resolve, Math.pow(2, nextItem.retries) * 1000)
@@ -226,7 +245,7 @@ class HeadshotProcessor {
     // Check if stop was requested
     if (this.stopRequested) {
       this.stopRequested = false;
-      console.log('Processing stopped by user request');
+      this.log('Processing stopped by user', 'warning');
       return;
     }
 
@@ -316,7 +335,7 @@ class HeadshotProcessor {
     }
 
     // Step 2: Detect face and calculate smart crop region
-    console.log('Detecting face and calculating crop...');
+    this.log('Detecting face position...', 'step');
     const faceData = await this.detectFaceAndCrop(workingImagePath);
 
     const client = new ReplicateClient(this.apiKey);
@@ -325,6 +344,7 @@ class HeadshotProcessor {
 
     // Process Portrait (4:5) version if enabled
     if (opts.outputPortrait) {
+      this.log('Creating 4:5 portrait crop...', 'step');
       const croppedPath = path.join(outputFolder, `${baseName}_temp_cropped.jpg`);
       tempFiles.push(croppedPath);
 
@@ -334,7 +354,7 @@ class HeadshotProcessor {
 
       // Face enhancement if enabled (scalable: off, low, medium, high)
       if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
-        console.log(`Enhancing face (4:5) - intensity: ${opts.faceEnhancement}...`);
+        this.log(`Face enhancement (4:5) - ${opts.faceEnhancement}...`, 'step');
         const enhanceResult = await client.enhanceFace(croppedPath, opts.faceEnhancement);
         if (!enhanceResult.success && !enhanceResult.skipped) {
           throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
@@ -352,7 +372,7 @@ class HeadshotProcessor {
 
       // Skin smoothing if enabled (scalable: off, low, medium, high)
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
-        console.log(`Smoothing skin (4:5) - intensity: ${opts.skinSmoothing}...`);
+        this.log(`Skin smoothing (4:5) - ${opts.skinSmoothing}...`, 'step');
         const skinResult = await client.smoothSkin(portraitImagePath, opts.skinSmoothing);
         if (!skinResult.success && !skinResult.skipped) {
           throw new Error(`Skin smoothing failed: ${skinResult.error}`);
@@ -370,7 +390,7 @@ class HeadshotProcessor {
 
       // Upscaling if enabled (scalable: off, 2x, 4x)
       if (opts.upscaling && opts.upscaling !== 'off') {
-        console.log(`Upscaling (4:5) - scale: ${opts.upscaling}...`);
+        this.log(`Upscaling (4:5) - ${opts.upscaling}...`, 'step');
         const upscaleResult = await client.upscaleImage(portraitImagePath, opts.upscaling);
         if (!upscaleResult.success && !upscaleResult.skipped) {
           throw new Error(`Upscaling failed: ${upscaleResult.error}`);
@@ -387,6 +407,7 @@ class HeadshotProcessor {
       }
 
       // Save final portrait JPEG with -4x5 suffix
+      this.log('Saving 4:5 portrait...', 'step');
       const finalPortraitPath = path.join(outputFolder, `${baseName}-4x5.jpg`);
       if (portraitImagePath !== croppedPath) {
         fs.copyFileSync(portraitImagePath, finalPortraitPath);
@@ -397,7 +418,7 @@ class HeadshotProcessor {
 
       // Background removal if enabled
       if (opts.backgroundRemoval) {
-        console.log('Removing background (4:5)...');
+        this.log('Removing background (4:5)...', 'step');
         const bgResult = await client.removeBackground(finalPortraitPath);
         if (!bgResult.success) {
           throw new Error(`Background removal failed: ${bgResult.error}`);
@@ -412,7 +433,7 @@ class HeadshotProcessor {
 
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
-          console.log(`Adding background color: ${opts.backgroundColor}`);
+          this.log(`Adding background color ${opts.backgroundColor}...`, 'step');
           const coloredPath = path.join(outputFolder, `${baseName}-4x5-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentPngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
@@ -424,6 +445,7 @@ class HeadshotProcessor {
 
     // Process Square (1:1) version if enabled
     if (opts.outputSquare) {
+      this.log('Creating square crop...', 'step');
       const squarePath = path.join(outputFolder, `${baseName}_temp_square.jpg`);
       tempFiles.push(squarePath);
 
@@ -433,7 +455,7 @@ class HeadshotProcessor {
 
       // Face enhancement if enabled (scalable: off, low, medium, high)
       if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
-        console.log(`Enhancing face (square) - intensity: ${opts.faceEnhancement}...`);
+        this.log(`Face enhancement (square) - ${opts.faceEnhancement}...`, 'step');
         const enhanceResult = await client.enhanceFace(squarePath, opts.faceEnhancement);
         if (!enhanceResult.success && !enhanceResult.skipped) {
           throw new Error(`Square face enhancement failed: ${enhanceResult.error}`);
@@ -451,7 +473,7 @@ class HeadshotProcessor {
 
       // Skin smoothing if enabled (scalable: off, low, medium, high)
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
-        console.log(`Smoothing skin (square) - intensity: ${opts.skinSmoothing}...`);
+        this.log(`Skin smoothing (square) - ${opts.skinSmoothing}...`, 'step');
         const skinResult = await client.smoothSkin(squareImagePath, opts.skinSmoothing);
         if (!skinResult.success && !skinResult.skipped) {
           throw new Error(`Square skin smoothing failed: ${skinResult.error}`);
@@ -469,7 +491,7 @@ class HeadshotProcessor {
 
       // Upscaling if enabled (scalable: off, 2x, 4x)
       if (opts.upscaling && opts.upscaling !== 'off') {
-        console.log(`Upscaling (square) - scale: ${opts.upscaling}...`);
+        this.log(`Upscaling (square) - ${opts.upscaling}...`, 'step');
         const upscaleResult = await client.upscaleImage(squareImagePath, opts.upscaling);
         if (!upscaleResult.success && !upscaleResult.skipped) {
           throw new Error(`Square upscaling failed: ${upscaleResult.error}`);
@@ -486,6 +508,7 @@ class HeadshotProcessor {
       }
 
       // Save final square JPEG with -SQR suffix
+      this.log('Saving square...', 'step');
       const finalSquarePath = path.join(outputFolder, `${baseName}-SQR.jpg`);
       if (squareImagePath !== squarePath) {
         fs.copyFileSync(squareImagePath, finalSquarePath);
@@ -496,7 +519,7 @@ class HeadshotProcessor {
 
       // Background removal if enabled
       if (opts.backgroundRemoval) {
-        console.log('Removing background (square)...');
+        this.log('Removing background (square)...', 'step');
         const bgSquareResult = await client.removeBackground(finalSquarePath);
         if (!bgSquareResult.success) {
           throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
@@ -511,7 +534,7 @@ class HeadshotProcessor {
 
         // Add solid background color if specified
         if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
-          console.log(`Adding background color (square): ${opts.backgroundColor}`);
+          this.log(`Adding background color (square) ${opts.backgroundColor}...`, 'step');
           const coloredPath = path.join(outputFolder, `${baseName}-SQR-BG.jpg`);
           const colorResult = await client.addBackgroundColor(transparentSquarePngPath, coloredPath, opts.backgroundColor);
           if (colorResult.success) {
@@ -663,16 +686,30 @@ class HeadshotProcessor {
     cropWidth = Math.round(cropWidth);
     cropHeight = Math.round(cropHeight);
 
-    // HORIZONTAL: Center crop on the face center - this is the priority
+    // HORIZONTAL: Center crop on the face center (nose) - this is the priority
     let cropX = Math.round(faceCenterX - cropWidth / 2);
 
-    // VERTICAL: Position face in upper portion of frame
-    // For headshots, face should be around 30-35% from top
-    const targetFacePositionY = aspectRatio === 1
-      ? cropHeight * 0.35  // For square, face in upper third
-      : cropHeight * 0.30; // For portrait, face higher up
+    // VERTICAL: Position to ensure full head is in frame
+    // The face center (nose) is roughly 60% down from top of head
+    // So headTop ≈ faceCenterY - (estimatedFaceHeight * 0.8)
+    const estimatedHeadTop = faceCenterY - (estimatedFaceHeight * 0.8);
 
-    let cropY = Math.round(faceCenterY - targetFacePositionY);
+    // For square crops: position head with good headroom (15% from top)
+    // For portrait crops: position head with more headroom (12% from top)
+    const headroomPercent = aspectRatio === 1 ? 0.15 : 0.12;
+    const desiredHeadTop = cropHeight * headroomPercent;
+
+    // Calculate crop Y so that the estimated head top is at the desired position
+    let cropY = Math.round(estimatedHeadTop - desiredHeadTop);
+
+    // Ensure there's enough room for the body below
+    // If this pushes the crop too high, adjust
+    const minBodyRoom = aspectRatio === 1 ? cropHeight * 0.35 : cropHeight * 0.45;
+    const availableBodyRoom = (cropY + cropHeight) - faceCenterY;
+    if (availableBodyRoom < minBodyRoom) {
+      // Need more body room, move crop down
+      cropY = Math.round(faceCenterY + minBodyRoom - cropHeight);
+    }
 
     // Clamp to safe bounds (with edge margin) to avoid backdrop corners
     if (cropX < edgeMargin) {
