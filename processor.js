@@ -281,28 +281,43 @@ class HeadshotProcessor {
     item.tempFileCreated = tempFileCreated;
     item.workingImagePath = workingImagePath;
 
+    // Create output subfolders for each version type
+    const folders = {
+      portrait: path.join(outputFolder, '4x5'),
+      portraitTransparent: path.join(outputFolder, '4x5_transparent'),
+      square: path.join(outputFolder, 'square'),
+      squareTransparent: path.join(outputFolder, 'square_transparent')
+    };
+
+    // Create all subfolders
+    for (const folder of Object.values(folders)) {
+      if (!fs.existsSync(folder)) {
+        fs.mkdirSync(folder, { recursive: true });
+      }
+    }
+
     // Step 2: Detect face and calculate smart crop region
     console.log('Detecting face and calculating crop...');
     const faceData = await this.detectFaceAndCrop(workingImagePath);
 
-    // Step 3: Apply smart crop, color correction, and create cropped versions
-    const croppedPath = path.join(outputFolder, `${baseName}_cropped.jpg`);
-    const squarePath = path.join(outputFolder, `${baseName}_square.jpg`);
+    // Step 3: Apply smart crop, color correction, and create cropped versions (temp files)
+    const croppedPath = path.join(outputFolder, `${baseName}_temp_cropped.jpg`);
+    const squarePath = path.join(outputFolder, `${baseName}_temp_square.jpg`);
 
     await this.applySmartCropAndCorrection(workingImagePath, croppedPath, faceData, HEADSHOT_ASPECT_RATIO);
     await this.applySmartCropAndCorrection(workingImagePath, squarePath, faceData, SQUARE_ASPECT_RATIO);
 
-    // Step 4: Face enhancement via Replicate (GFPGAN) on the cropped version
+    // Step 4: Face enhancement via Replicate (CodeFormer) on the cropped version
     const client = new ReplicateClient(this.apiKey);
-    console.log('Enhancing face...');
+    console.log('Enhancing face (4:5)...');
     const enhanceResult = await client.enhanceFace(croppedPath);
 
     if (!enhanceResult.success) {
       throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
     }
 
-    // Download enhanced image (4:5 ratio)
-    const enhancedJpegPath = path.join(outputFolder, `${baseName}.jpg`);
+    // Download enhanced image (4:5 ratio) to 4x5 folder
+    const enhancedJpegPath = path.join(folders.portrait, `${baseName}.jpg`);
     const downloadResult = await client.downloadImage(enhanceResult.url, enhancedJpegPath);
 
     if (!downloadResult.success) {
@@ -310,15 +325,15 @@ class HeadshotProcessor {
     }
 
     // Step 5: Enhance the square version too
-    console.log('Enhancing square version...');
+    console.log('Enhancing face (square)...');
     const enhanceSquareResult = await client.enhanceFace(squarePath);
 
     if (!enhanceSquareResult.success) {
       throw new Error(`Square face enhancement failed: ${enhanceSquareResult.error}`);
     }
 
-    // Download enhanced square image
-    const enhancedSquarePath = path.join(outputFolder, `${baseName}_square.jpg`);
+    // Download enhanced square image to square folder
+    const enhancedSquarePath = path.join(folders.square, `${baseName}.jpg`);
     const squareDownloadResult = await client.downloadImage(enhanceSquareResult.url, enhancedSquarePath);
 
     if (!squareDownloadResult.success) {
@@ -326,15 +341,15 @@ class HeadshotProcessor {
     }
 
     // Step 6: Background removal via Replicate (on the 4:5 version)
-    console.log('Removing background...');
+    console.log('Removing background (4:5)...');
     const bgResult = await client.removeBackground(enhancedJpegPath);
 
     if (!bgResult.success) {
       throw new Error(`Background removal failed: ${bgResult.error}`);
     }
 
-    // Download transparent PNG (4:5 ratio)
-    const transparentPngPath = path.join(outputFolder, `${baseName}.png`);
+    // Download transparent PNG (4:5 ratio) to 4x5_transparent folder
+    const transparentPngPath = path.join(folders.portraitTransparent, `${baseName}.png`);
     const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
 
     if (!pngDownloadResult.success) {
@@ -342,15 +357,15 @@ class HeadshotProcessor {
     }
 
     // Step 7: Background removal for square version
-    console.log('Removing background from square version...');
+    console.log('Removing background (square)...');
     const bgSquareResult = await client.removeBackground(enhancedSquarePath);
 
     if (!bgSquareResult.success) {
       throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
     }
 
-    // Download transparent square PNG
-    const transparentSquarePngPath = path.join(outputFolder, `${baseName}_square.png`);
+    // Download transparent square PNG to square_transparent folder
+    const transparentSquarePngPath = path.join(folders.squareTransparent, `${baseName}.png`);
     const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
 
     if (!squarePngDownloadResult.success) {
@@ -360,7 +375,7 @@ class HeadshotProcessor {
     // Clean up temp files
     const tempFiles = [croppedPath, squarePath];
     for (const tempFile of tempFiles) {
-      if (fs.existsSync(tempFile) && tempFile !== enhancedJpegPath && tempFile !== enhancedSquarePath) {
+      if (fs.existsSync(tempFile)) {
         try { fs.unlinkSync(tempFile); } catch (e) { /* ignore */ }
       }
     }
