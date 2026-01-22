@@ -27,6 +27,7 @@ class HeadshotProcessor {
     this.maxRetries = 3;
     this.onStatusUpdate = null; // Callback for UI updates
     this.onLogMessage = null;   // Callback for log messages to UI
+    this.onProcessingComplete = null; // Callback when item finishes processing
     this.watchFolder = null; // Set by main.js for JPEG fallback lookup
     this.queueFilePath = path.join(app.getPath('userData'), 'processing_queue.json');
     this.stopRequested = false; // Flag to stop processing after current item
@@ -219,6 +220,21 @@ class HeadshotProcessor {
       nextItem.status = 'completed';
       nextItem.completedAt = new Date().toISOString();
       this.log(`Completed: ${nextItem.baseName}`, 'success');
+
+      // Trigger completion callback with output files for gallery upload
+      if (this.onProcessingComplete) {
+        const outputFiles = [
+          nextItem.enhancedJpegPath,        // -4x5.jpg
+          nextItem.transparentPngPath,       // -4x5-TP.png
+          nextItem.enhancedSquarePath,       // -SQR.jpg
+          nextItem.transparentSquarePngPath  // -SQR-TP.png
+        ].filter(f => f && fs.existsSync(f));
+
+        this.onProcessingComplete({
+          item: nextItem,
+          outputFiles
+        });
+      }
     } catch (error) {
       console.error('Processing error:', error);
       nextItem.error = error.message;

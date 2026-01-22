@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const HeadshotProcessor = require('./processor');
 const ReplicateClient = require('./replicate');
+const TurboIQGalleryClient = require('./gallery-client');
 
 let mainWindow;
 let watcher;
@@ -13,6 +14,11 @@ let outputFolder = '';
 let sessionsFile = '';
 let contactsFile = '';
 let processor = null;
+
+// Gallery integration
+let galleryClient = null;
+let selectedGalleryId = null;
+let selectedGalleryName = null;
 
 // AI Processing settings
 let aiSettings = {
@@ -30,6 +36,18 @@ let aiSettings = {
   // Background options
   backgroundRemoval: true,
   backgroundColor: ''        // Empty = transparent, or hex like '#FFFFFF'
+};
+
+// Gallery settings
+let gallerySettings = {
+  username: '',
+  password: '',
+  autoUpload: false,
+  uploadPortrait: true,
+  uploadSquare: true,
+  uploadTransparent: true,
+  lastGalleryId: null,
+  lastGalleryName: null
 };
 
 // Generate unique shoot number in format YYYYMMDD-NNN
@@ -220,6 +238,81 @@ function createWindow() {
     }
   };
 
+  // Hook processing completion for gallery auto-upload
+  processor.onProcessingComplete = async (data) => {
+    // Notify renderer of completion
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('processing-item-complete', data);
+    }
+
+    // Auto-upload to gallery if enabled
+    if (selectedGalleryId && gallerySettings.autoUpload && galleryClient) {
+      // Ensure we're authenticated
+      if (!galleryClient.isAuthenticated() && gallerySettings.username && gallerySettings.password) {
+        const loginResult = await galleryClient.login(gallerySettings.username, gallerySettings.password);
+        if (!loginResult.success) {
+          console.error('[Gallery] Auto-upload auth failed:', loginResult.error);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gallery-upload-result', {
+              success: false,
+              error: `Authentication failed: ${loginResult.error}`
+            });
+          }
+          return;
+        }
+      }
+
+      // Filter files based on upload preferences
+      const filesToUpload = data.outputFiles.filter(filePath => {
+        const filename = path.basename(filePath);
+        const isPortrait = filename.includes('-4x5.') && !filename.includes('-TP.');
+        const isSquare = filename.includes('-SQR.') && !filename.includes('-TP.');
+        const isTransparent = filename.includes('-TP.');
+
+        if (isTransparent && !gallerySettings.uploadTransparent) return false;
+        if (isPortrait && !gallerySettings.uploadPortrait) return false;
+        if (isSquare && !gallerySettings.uploadSquare) return false;
+
+        return true;
+      });
+
+      // Upload each file
+      for (const filePath of filesToUpload) {
+        const filename = path.basename(filePath);
+        console.log(`[Gallery] Auto-uploading: ${filename}`);
+
+        try {
+          const result = await galleryClient.uploadPhoto(selectedGalleryId, filePath);
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gallery-upload-result', {
+              filePath,
+              filename,
+              success: result.success,
+              error: result.error
+            });
+          }
+
+          if (result.success) {
+            processor.log(`Uploaded to gallery: ${filename}`, 'success');
+          } else {
+            processor.log(`Gallery upload failed: ${filename} - ${result.error}`, 'error');
+          }
+        } catch (err) {
+          console.error(`[Gallery] Upload error for ${filename}:`, err);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('gallery-upload-result', {
+              filePath,
+              filename,
+              success: false,
+              error: err.message
+            });
+          }
+        }
+      }
+    }
+  };
+
   // Load saved settings
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   if (fs.existsSync(settingsPath)) {
@@ -243,6 +336,26 @@ function createWindow() {
       aiSettings.upscaling = settings.upscaling || 'off';
       aiSettings.backgroundRemoval = settings.backgroundRemoval !== false;
       aiSettings.backgroundColor = settings.backgroundColor || '';
+
+      // Load gallery settings
+      gallerySettings.username = settings.galleryUsername || '';
+      gallerySettings.password = settings.galleryPassword || '';
+      gallerySettings.autoUpload = settings.galleryAutoUpload || false;
+      gallerySettings.uploadPortrait = settings.uploadPortrait !== false;
+      gallerySettings.uploadSquare = settings.uploadSquare !== false;
+      gallerySettings.uploadTransparent = settings.uploadTransparent !== false;
+      gallerySettings.lastGalleryId = settings.lastGalleryId || null;
+      gallerySettings.lastGalleryName = settings.lastGalleryName || null;
+
+      // Restore gallery selection
+      selectedGalleryId = gallerySettings.lastGalleryId;
+      selectedGalleryName = gallerySettings.lastGalleryName;
+
+      // Initialize gallery client if credentials exist
+      if (gallerySettings.username && gallerySettings.password) {
+        galleryClient = new TurboIQGalleryClient();
+        // Don't await login here - will authenticate on first API call
+      }
 
       // Configure processor with API key and watch folder
       if (aiSettings.replicateApiKey) {
@@ -506,6 +619,176 @@ ipcMain.handle('clear-queue', (event, clearFailed = false) => {
   return { success: false, error: 'Processor not initialized' };
 });
 
+// ============================================
+// Gallery IPC Handlers
+// ============================================
+
+// Get gallery settings
+ipcMain.handle('get-gallery-settings', () => {
+  return {
+    isAuthenticated: galleryClient ? galleryClient.isAuthenticated() : false,
+    autoUpload: gallerySettings.autoUpload,
+    uploadPortrait: gallerySettings.uploadPortrait,
+    uploadSquare: gallerySettings.uploadSquare,
+    uploadTransparent: gallerySettings.uploadTransparent,
+    selectedGalleryId: selectedGalleryId,
+    selectedGalleryName: selectedGalleryName,
+    hasCredentials: !!(gallerySettings.username && gallerySettings.password)
+  };
+});
+
+// Set gallery credentials and test connection
+ipcMain.handle('set-gallery-credentials', async (event, { username, password }) => {
+  try {
+    // Initialize client if needed
+    if (!galleryClient) {
+      galleryClient = new TurboIQGalleryClient();
+    }
+
+    // Try to login
+    const result = await galleryClient.login(username, password);
+
+    if (result.success) {
+      // Save credentials
+      gallerySettings.username = username;
+      gallerySettings.password = password;
+      saveSettings();
+
+      return {
+        success: true,
+        message: 'Connected to Turbo IQ Gallery',
+        user: result.user
+      };
+    }
+
+    return { success: false, error: result.error };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Test gallery connection
+ipcMain.handle('test-gallery-connection', async () => {
+  if (!galleryClient) {
+    return { success: false, error: 'Not configured' };
+  }
+
+  // If not authenticated but we have credentials, try to login
+  if (!galleryClient.isAuthenticated() && gallerySettings.username && gallerySettings.password) {
+    const loginResult = await galleryClient.login(gallerySettings.username, gallerySettings.password);
+    if (!loginResult.success) {
+      return { success: false, error: loginResult.error };
+    }
+  }
+
+  return await galleryClient.testConnection();
+});
+
+// List galleries
+ipcMain.handle('list-galleries', async (event, page = 1) => {
+  if (!galleryClient) {
+    return { success: false, error: 'Not configured', galleries: [] };
+  }
+
+  // Ensure we're authenticated
+  if (!galleryClient.isAuthenticated() && gallerySettings.username && gallerySettings.password) {
+    const loginResult = await galleryClient.login(gallerySettings.username, gallerySettings.password);
+    if (!loginResult.success) {
+      return { success: false, error: loginResult.error, galleries: [] };
+    }
+  }
+
+  return await galleryClient.listGalleries(page);
+});
+
+// Create a new gallery
+ipcMain.handle('create-gallery', async (event, { name, eventDate }) => {
+  if (!galleryClient) {
+    return { success: false, error: 'Not configured' };
+  }
+
+  // Ensure we're authenticated
+  if (!galleryClient.isAuthenticated() && gallerySettings.username && gallerySettings.password) {
+    const loginResult = await galleryClient.login(gallerySettings.username, gallerySettings.password);
+    if (!loginResult.success) {
+      return { success: false, error: loginResult.error };
+    }
+  }
+
+  return await galleryClient.createGallery(name, eventDate);
+});
+
+// Set selected gallery for auto-upload
+ipcMain.handle('set-selected-gallery', (event, { galleryId, galleryName }) => {
+  selectedGalleryId = galleryId;
+  selectedGalleryName = galleryName;
+  gallerySettings.lastGalleryId = galleryId;
+  gallerySettings.lastGalleryName = galleryName;
+  saveSettings();
+
+  return {
+    success: true,
+    galleryId: selectedGalleryId,
+    galleryName: selectedGalleryName
+  };
+});
+
+// Clear gallery selection
+ipcMain.handle('clear-gallery-selection', () => {
+  selectedGalleryId = null;
+  selectedGalleryName = null;
+  return { success: true };
+});
+
+// Set gallery upload options
+ipcMain.handle('set-gallery-upload-options', (event, options) => {
+  if (options.autoUpload !== undefined) {
+    gallerySettings.autoUpload = options.autoUpload;
+  }
+  if (options.uploadPortrait !== undefined) {
+    gallerySettings.uploadPortrait = options.uploadPortrait;
+  }
+  if (options.uploadSquare !== undefined) {
+    gallerySettings.uploadSquare = options.uploadSquare;
+  }
+  if (options.uploadTransparent !== undefined) {
+    gallerySettings.uploadTransparent = options.uploadTransparent;
+  }
+  saveSettings();
+
+  return { success: true };
+});
+
+// Upload a single photo to gallery
+ipcMain.handle('upload-to-gallery', async (event, { galleryId, filePath }) => {
+  if (!galleryClient) {
+    return { success: false, error: 'Gallery not configured' };
+  }
+
+  if (!galleryClient.isAuthenticated() && gallerySettings.username && gallerySettings.password) {
+    const loginResult = await galleryClient.login(gallerySettings.username, gallerySettings.password);
+    if (!loginResult.success) {
+      return { success: false, error: loginResult.error };
+    }
+  }
+
+  return await galleryClient.uploadPhoto(galleryId, filePath);
+});
+
+// Logout from gallery
+ipcMain.handle('gallery-logout', () => {
+  if (galleryClient) {
+    galleryClient.logout();
+  }
+  gallerySettings.username = '';
+  gallerySettings.password = '';
+  selectedGalleryId = null;
+  selectedGalleryName = null;
+  saveSettings();
+
+  return { success: true };
+});
+
 // Get list of existing session folders for reprocessing
 ipcMain.handle('get-session-folders', () => {
   if (!outputFolder || !fs.existsSync(outputFolder)) {
@@ -596,6 +879,81 @@ ipcMain.handle('reprocess-folder', async (event, folderPath) => {
     success: true,
     queued: queuedCount,
     message: queuedCount > 0 ? `Added ${queuedCount} photo(s) to processing queue` : 'All photos already processed'
+  };
+});
+
+// Reprocess all session folders
+ipcMain.handle('reprocess-all-folders', async () => {
+  if (!processor) {
+    return { success: false, error: 'Processor not initialized' };
+  }
+
+  if (!outputFolder || !fs.existsSync(outputFolder)) {
+    return { success: false, error: 'Output folder not set' };
+  }
+
+  const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
+  const jpegExtensions = ['.jpg', '.jpeg'];
+
+  let totalQueued = 0;
+  let foldersProcessed = 0;
+
+  // Get all session folders
+  const folders = fs.readdirSync(outputFolder, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory())
+    .map(dirent => {
+      const folderPath = path.join(outputFolder, dirent.name);
+      const match = dirent.name.match(/^(\d{8}-\d{3})_(.+)$/);
+      return {
+        path: folderPath,
+        name: dirent.name,
+        shootNumber: match ? match[1] : dirent.name
+      };
+    });
+
+  for (const folder of folders) {
+    const files = fs.readdirSync(folder.path);
+    const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+
+    if (rawFiles.length === 0) continue;
+
+    let folderQueued = 0;
+
+    for (const rawFile of rawFiles) {
+      const baseName = path.basename(rawFile, path.extname(rawFile));
+      const sourcePath = path.join(folder.path, rawFile);
+
+      // Check if already processed (has corresponding enhanced files)
+      const hasProcessedJpg = files.some(f =>
+        f === `${baseName}.jpg` && !jpegExtensions.includes(path.extname(rawFile).toLowerCase())
+      );
+
+      // Skip if already has processed outputs
+      if (hasProcessedJpg && files.includes(`${baseName}.png`)) {
+        continue;
+      }
+
+      // Add to processing queue
+      processor.addToQueue({
+        sourcePath: sourcePath,
+        outputFolder: folder.path,
+        shootNumber: folder.shootNumber,
+        baseName: baseName
+      });
+      folderQueued++;
+      totalQueued++;
+    }
+
+    if (folderQueued > 0) {
+      foldersProcessed++;
+    }
+  }
+
+  return {
+    success: true,
+    totalQueued,
+    foldersProcessed,
+    message: totalQueued > 0 ? `Added ${totalQueued} photo(s) from ${foldersProcessed} folder(s) to queue` : 'All photos already processed'
   };
 });
 
@@ -783,7 +1141,16 @@ function saveSettings() {
     skinSmoothing: aiSettings.skinSmoothing,
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
-    backgroundColor: aiSettings.backgroundColor
+    backgroundColor: aiSettings.backgroundColor,
+    // Gallery settings
+    galleryUsername: gallerySettings.username,
+    galleryPassword: gallerySettings.password,
+    galleryAutoUpload: gallerySettings.autoUpload,
+    uploadPortrait: gallerySettings.uploadPortrait,
+    uploadSquare: gallerySettings.uploadSquare,
+    uploadTransparent: gallerySettings.uploadTransparent,
+    lastGalleryId: gallerySettings.lastGalleryId,
+    lastGalleryName: gallerySettings.lastGalleryName
   };
   console.log('Saving settings to:', settingsPath);
   console.log('API key length being saved:', aiSettings.replicateApiKey?.length || 0);

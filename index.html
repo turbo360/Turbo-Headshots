@@ -328,6 +328,68 @@
     .processing-log .log-warning { color: #fcc419; }
     .processing-log .log-error { color: #ff6b6b; }
     .processing-log .log-step { color: #c083e0; }
+
+    /* Gallery Modal Styles */
+    .gallery-indicator {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 15px;
+      background: rgba(81, 207, 102, 0.1); border: 1px solid rgba(81, 207, 102, 0.3);
+      border-radius: 8px; padding: 10px 15px;
+    }
+    .gallery-indicator .gallery-name { flex: 1; font-weight: 500; color: #51cf66; }
+    .gallery-indicator .btn-clear {
+      background: none; border: none; color: #888; cursor: pointer;
+      font-size: 1.2em; padding: 0 5px; transition: color 0.2s;
+    }
+    .gallery-indicator .btn-clear:hover { color: #ff6b6b; }
+
+    .gallery-list { max-height: 300px; overflow-y: auto; margin-bottom: 15px; }
+    .gallery-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 15px; background: rgba(255,255,255,0.05); border-radius: 8px;
+      margin-bottom: 8px; cursor: pointer; transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+    .gallery-item:hover { background: rgba(255,255,255,0.1); }
+    .gallery-item.selected { border-color: #51cf66; background: rgba(81, 207, 102, 0.1); }
+    .gallery-item .gallery-info { flex: 1; }
+    .gallery-item .gallery-title { font-weight: 500; margin-bottom: 3px; }
+    .gallery-item .gallery-meta { font-size: 0.8em; color: #888; }
+    .gallery-item .btn-select {
+      padding: 6px 12px; background: rgba(200, 50, 50, 0.3); border: none;
+      border-radius: 6px; color: #fff; font-size: 0.85em; cursor: pointer;
+    }
+    .gallery-item .btn-select:hover { background: rgba(200, 50, 50, 0.5); }
+
+    .create-gallery-form { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .create-gallery-form .form-row { display: flex; gap: 10px; align-items: flex-end; }
+    .create-gallery-form .form-row .form-group { flex: 1; margin-bottom: 0; }
+    .create-gallery-form .form-row .btn { width: auto; padding: 12px 20px; }
+
+    .upload-options { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .upload-options h4 { font-size: 0.9em; color: #aaa; margin-bottom: 10px; }
+
+    .login-section { margin-bottom: 20px; }
+    .login-section.hidden { display: none; }
+    .auth-status {
+      display: flex; align-items: center; gap: 10px; padding: 10px 15px;
+      background: rgba(81, 207, 102, 0.1); border-radius: 8px; margin-bottom: 15px;
+    }
+    .auth-status .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #51cf66; }
+    .auth-status .status-text { flex: 1; color: #51cf66; }
+    .auth-status .btn-logout {
+      padding: 4px 10px; background: rgba(255,255,255,0.1); border: none;
+      border-radius: 4px; color: #aaa; font-size: 0.8em; cursor: pointer;
+    }
+    .auth-status .btn-logout:hover { background: rgba(255,255,255,0.2); }
+
+    .upload-stats { display: flex; gap: 10px; margin-top: 10px; }
+    .upload-stat {
+      flex: 1; text-align: center; padding: 8px; background: rgba(0,0,0,0.2);
+      border-radius: 6px; font-size: 0.8em;
+    }
+    .upload-stat .value { font-size: 1.2em; font-weight: 600; }
+    .upload-stat.success .value { color: #51cf66; }
+    .upload-stat.failed .value { color: #ff6b6b; }
   </style>
 </head>
 <body>
@@ -429,6 +491,13 @@
     <!-- Processing Queue Panel -->
     <div class="queue-panel" id="queuePanel">
       <h3>AI Enhancement Queue</h3>
+
+      <!-- Gallery Indicator (shown when gallery is selected) -->
+      <div id="galleryIndicator" class="gallery-indicator" style="display: none;">
+        <span>Uploading to:</span>
+        <span class="gallery-name" id="selectedGalleryName">-</span>
+        <button class="btn-clear" onclick="clearGallerySelection()" title="Clear selection">&times;</button>
+      </div>
       <div class="queue-stats">
         <div class="queue-stat pending">
           <div class="value" id="queuePending">0</div>
@@ -449,6 +518,7 @@
       </div>
       <div class="queue-actions">
         <button class="btn-small btn-highlight" onclick="openReprocessModal()">Reprocess Existing</button>
+        <button class="btn-small" onclick="openGalleryModal()" style="background: rgba(81, 207, 102, 0.3); border: 1px solid rgba(81, 207, 102, 0.5);">Gallery Upload</button>
         <button class="btn-small btn-warning" id="stopProcessingBtn" onclick="stopProcessing()" disabled>Stop</button>
         <button class="btn-small btn-warning" id="clearQueueBtn" onclick="clearQueue()" disabled>Clear Queue</button>
         <button class="btn-small" id="retryFailedBtn" onclick="retryFailed()" disabled>Retry Failed</button>
@@ -489,6 +559,7 @@
       <div class="modal-actions">
         <button class="btn-secondary" onclick="closeReprocessModal()">Close</button>
         <button class="btn-secondary" onclick="selectCustomFolder()">Browse Other Folder...</button>
+        <button class="btn btn-primary" id="reprocessAllBtn" onclick="reprocessAllFolders()">Reprocess All</button>
       </div>
     </div>
   </div>
@@ -599,6 +670,114 @@
       <div class="modal-actions">
         <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
         <button class="btn btn-primary" onclick="testAndSaveApiKey()">Test & Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery Modal -->
+  <div class="modal-overlay" id="galleryModal">
+    <div class="modal" style="max-width: 600px;">
+      <h2>Turbo IQ Gallery</h2>
+
+      <!-- Login Section (shown when not authenticated) -->
+      <div id="galleryLoginSection" class="login-section">
+        <p style="color: #888; margin-bottom: 15px;">Connect to your Turbo IQ Gallery account to auto-upload processed photos.</p>
+
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="galleryUsername" placeholder="Enter username">
+        </div>
+
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="galleryPassword" placeholder="Enter password">
+        </div>
+
+        <div id="galleryLoginStatus"></div>
+
+        <button class="btn btn-primary" onclick="loginToGallery()" style="margin-top: 15px;">
+          Connect to Gallery
+        </button>
+      </div>
+
+      <!-- Authenticated Section (shown when logged in) -->
+      <div id="galleryAuthSection" style="display: none;">
+        <div class="auth-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connected to Turbo IQ Gallery</span>
+          <button class="btn-logout" onclick="logoutFromGallery()">Logout</button>
+        </div>
+
+        <!-- Gallery Selection -->
+        <h3 style="font-size: 1em; color: #aaa; margin-bottom: 10px;">Select Gallery</h3>
+
+        <div id="galleryList" class="gallery-list">
+          <div class="empty-state">Loading galleries...</div>
+        </div>
+
+        <!-- Create New Gallery -->
+        <div class="create-gallery-form">
+          <h4 style="font-size: 0.9em; color: #aaa; margin-bottom: 10px;">Create New Gallery</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <input type="text" id="newGalleryName" placeholder="Gallery name (e.g., Corporate Headshots 2024)">
+            </div>
+            <button class="btn btn-primary" onclick="createNewGallery()">Create</button>
+          </div>
+        </div>
+
+        <!-- Upload Options -->
+        <div class="upload-options">
+          <h4>Auto-Upload Options</h4>
+
+          <div class="toggle-group">
+            <label>Auto-upload after processing</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="galleryAutoUpload" onchange="saveGalleryOptions()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-group">
+            <label>Upload Portrait (4:5)</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="galleryUploadPortrait" onchange="saveGalleryOptions()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-group">
+            <label>Upload Square (1:1)</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="galleryUploadSquare" onchange="saveGalleryOptions()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-group">
+            <label>Upload Transparent PNGs</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="galleryUploadTransparent" onchange="saveGalleryOptions()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Upload Stats -->
+          <div class="upload-stats">
+            <div class="upload-stat success">
+              <div class="value" id="galleryUploadSuccess">0</div>
+              <div>Uploaded</div>
+            </div>
+            <div class="upload-stat failed">
+              <div class="value" id="galleryUploadFailed">0</div>
+              <div>Failed</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeGalleryModal()">Close</button>
       </div>
     </div>
   </div>
@@ -1240,6 +1419,28 @@
       }
     }
 
+    async function reprocessAllFolders() {
+      const btn = document.getElementById('reprocessAllBtn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+
+      try {
+        const result = await ipcRenderer.invoke('reprocess-all-folders');
+
+        if (result.success) {
+          showToast(`Added ${result.totalQueued} photo(s) from ${result.foldersProcessed} folder(s) to queue`);
+          closeReprocessModal();
+        } else {
+          showToast('Error: ' + result.error, true);
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Reprocess All';
+      }
+    }
+
     // Failed items display
     async function toggleFailedDetails() {
       const section = document.getElementById('failedItemsSection');
@@ -1304,6 +1505,272 @@
 
     // Initialize AI settings
     initAISettings();
+
+    // ============================================
+    // Gallery Functions
+    // ============================================
+
+    let gallerySettings = {
+      isAuthenticated: false,
+      autoUpload: false,
+      uploadPortrait: true,
+      uploadSquare: true,
+      uploadTransparent: true,
+      selectedGalleryId: null,
+      selectedGalleryName: null
+    };
+
+    let galleryUploadStats = { success: 0, failed: 0 };
+
+    // Initialize gallery settings on load
+    async function initGallerySettings() {
+      try {
+        const settings = await ipcRenderer.invoke('get-gallery-settings');
+        gallerySettings = { ...gallerySettings, ...settings };
+        updateGalleryUI();
+      } catch (err) {
+        console.error('Error loading gallery settings:', err);
+      }
+    }
+
+    function updateGalleryUI() {
+      // Update gallery indicator
+      const indicator = document.getElementById('galleryIndicator');
+      if (gallerySettings.selectedGalleryId && gallerySettings.autoUpload) {
+        indicator.style.display = 'flex';
+        document.getElementById('selectedGalleryName').textContent = gallerySettings.selectedGalleryName || 'Selected Gallery';
+      } else {
+        indicator.style.display = 'none';
+      }
+
+      // Update modal UI
+      document.getElementById('galleryAutoUpload').checked = gallerySettings.autoUpload;
+      document.getElementById('galleryUploadPortrait').checked = gallerySettings.uploadPortrait;
+      document.getElementById('galleryUploadSquare').checked = gallerySettings.uploadSquare;
+      document.getElementById('galleryUploadTransparent').checked = gallerySettings.uploadTransparent;
+
+      // Update upload stats
+      document.getElementById('galleryUploadSuccess').textContent = galleryUploadStats.success;
+      document.getElementById('galleryUploadFailed').textContent = galleryUploadStats.failed;
+    }
+
+    async function openGalleryModal() {
+      document.getElementById('galleryModal').classList.add('show');
+
+      // Refresh settings
+      const settings = await ipcRenderer.invoke('get-gallery-settings');
+      gallerySettings = { ...gallerySettings, ...settings };
+
+      if (settings.isAuthenticated || settings.hasCredentials) {
+        // Try to test connection
+        const testResult = await ipcRenderer.invoke('test-gallery-connection');
+        if (testResult.success) {
+          showGalleryAuthSection();
+          loadGalleries();
+        } else {
+          showGalleryLoginSection();
+        }
+      } else {
+        showGalleryLoginSection();
+      }
+
+      updateGalleryUI();
+    }
+
+    function closeGalleryModal() {
+      document.getElementById('galleryModal').classList.remove('show');
+    }
+
+    function showGalleryLoginSection() {
+      document.getElementById('galleryLoginSection').style.display = 'block';
+      document.getElementById('galleryAuthSection').style.display = 'none';
+    }
+
+    function showGalleryAuthSection() {
+      document.getElementById('galleryLoginSection').style.display = 'none';
+      document.getElementById('galleryAuthSection').style.display = 'block';
+    }
+
+    async function loginToGallery() {
+      const username = document.getElementById('galleryUsername').value.trim();
+      const password = document.getElementById('galleryPassword').value;
+      const statusEl = document.getElementById('galleryLoginStatus');
+
+      if (!username || !password) {
+        statusEl.innerHTML = '<div class="status-message error">Please enter username and password</div>';
+        return;
+      }
+
+      statusEl.innerHTML = '<div class="status-message info">Connecting...</div>';
+
+      try {
+        const result = await ipcRenderer.invoke('set-gallery-credentials', { username, password });
+
+        if (result.success) {
+          statusEl.innerHTML = '<div class="status-message success">Connected successfully!</div>';
+          gallerySettings.isAuthenticated = true;
+
+          setTimeout(() => {
+            showGalleryAuthSection();
+            loadGalleries();
+          }, 1000);
+        } else {
+          statusEl.innerHTML = `<div class="status-message error">${result.error}</div>`;
+        }
+      } catch (err) {
+        statusEl.innerHTML = `<div class="status-message error">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function logoutFromGallery() {
+      await ipcRenderer.invoke('gallery-logout');
+      gallerySettings.isAuthenticated = false;
+      gallerySettings.selectedGalleryId = null;
+      gallerySettings.selectedGalleryName = null;
+      document.getElementById('galleryUsername').value = '';
+      document.getElementById('galleryPassword').value = '';
+      showGalleryLoginSection();
+      updateGalleryUI();
+      showToast('Logged out from gallery');
+    }
+
+    async function loadGalleries() {
+      const listEl = document.getElementById('galleryList');
+      listEl.innerHTML = '<div class="empty-state">Loading galleries...</div>';
+
+      try {
+        const result = await ipcRenderer.invoke('list-galleries');
+
+        if (!result.success) {
+          listEl.innerHTML = `<div class="empty-state">Error: ${result.error}</div>`;
+          return;
+        }
+
+        if (!result.galleries || result.galleries.length === 0) {
+          listEl.innerHTML = '<div class="empty-state">No galleries found. Create one below.</div>';
+          return;
+        }
+
+        listEl.innerHTML = result.galleries.map(g => {
+          const isSelected = gallerySettings.selectedGalleryId === (g.id || g._id);
+          const photoCount = g.photo_count || g.photos?.length || 0;
+          const createdDate = g.created_at ? new Date(g.created_at).toLocaleDateString() : '';
+
+          return `
+            <div class="gallery-item ${isSelected ? 'selected' : ''}" onclick="selectGallery('${g.id || g._id}', '${(g.name || '').replace(/'/g, "\\'")}')">
+              <div class="gallery-info">
+                <div class="gallery-title">${g.name || 'Untitled Gallery'}</div>
+                <div class="gallery-meta">${photoCount} photos${createdDate ? ' • Created ' + createdDate : ''}</div>
+              </div>
+              ${isSelected ? '<span style="color: #51cf66;">✓ Selected</span>' : '<button class="btn-select">Select</button>'}
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        listEl.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function selectGallery(galleryId, galleryName) {
+      try {
+        const result = await ipcRenderer.invoke('set-selected-gallery', { galleryId, galleryName });
+
+        if (result.success) {
+          gallerySettings.selectedGalleryId = galleryId;
+          gallerySettings.selectedGalleryName = galleryName;
+          updateGalleryUI();
+          loadGalleries(); // Refresh to show selection
+          showToast(`Gallery "${galleryName}" selected`);
+        }
+      } catch (err) {
+        showToast('Error selecting gallery: ' + err.message, true);
+      }
+    }
+
+    async function clearGallerySelection() {
+      await ipcRenderer.invoke('clear-gallery-selection');
+      gallerySettings.selectedGalleryId = null;
+      gallerySettings.selectedGalleryName = null;
+      updateGalleryUI();
+      showToast('Gallery selection cleared');
+    }
+
+    async function createNewGallery() {
+      const name = document.getElementById('newGalleryName').value.trim();
+
+      if (!name) {
+        showToast('Please enter a gallery name', true);
+        return;
+      }
+
+      try {
+        const result = await ipcRenderer.invoke('create-gallery', { name });
+
+        if (result.success) {
+          document.getElementById('newGalleryName').value = '';
+          showToast(`Gallery "${name}" created`);
+          loadGalleries();
+
+          // Auto-select the new gallery
+          const newGallery = result.gallery;
+          if (newGallery && (newGallery.id || newGallery._id)) {
+            await selectGallery(newGallery.id || newGallery._id, name);
+          }
+        } else {
+          showToast('Error: ' + result.error, true);
+        }
+      } catch (err) {
+        showToast('Error creating gallery: ' + err.message, true);
+      }
+    }
+
+    async function saveGalleryOptions() {
+      const options = {
+        autoUpload: document.getElementById('galleryAutoUpload').checked,
+        uploadPortrait: document.getElementById('galleryUploadPortrait').checked,
+        uploadSquare: document.getElementById('galleryUploadSquare').checked,
+        uploadTransparent: document.getElementById('galleryUploadTransparent').checked
+      };
+
+      // Require at least one file type
+      if (!options.uploadPortrait && !options.uploadSquare && !options.uploadTransparent) {
+        showToast('Please select at least one file type to upload', true);
+        document.getElementById('galleryUploadPortrait').checked = true;
+        return;
+      }
+
+      await ipcRenderer.invoke('set-gallery-upload-options', options);
+      gallerySettings = { ...gallerySettings, ...options };
+      updateGalleryUI();
+    }
+
+    // Listen for gallery upload results
+    ipcRenderer.on('gallery-upload-result', (event, data) => {
+      if (data.success) {
+        galleryUploadStats.success++;
+        addLogEntry(`Uploaded to gallery: ${data.filename}`, 'success');
+      } else {
+        galleryUploadStats.failed++;
+        addLogEntry(`Gallery upload failed: ${data.filename} - ${data.error}`, 'error');
+      }
+      updateGalleryUI();
+    });
+
+    // Listen for processing item complete
+    ipcRenderer.on('processing-item-complete', (event, data) => {
+      // This event is fired when a photo finishes processing
+      // Gallery upload is handled automatically in main process
+    });
+
+    // Close modal on escape or clicking outside
+    document.getElementById('galleryModal').addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+        closeGalleryModal();
+      }
+    });
+
+    // Initialize gallery settings
+    initGallerySettings();
   </script>
 </body>
 </html>
