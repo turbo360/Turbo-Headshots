@@ -297,21 +297,23 @@ class HeadshotProcessor {
         workingImagePath = jpegInOutputAlt;
         console.log('Found JPEG in output folder:', workingImagePath);
       } else if (this.watchFolder) {
-        // Try to find JPEG in watch folder with original naming
+        // Try to find JPEG in watch folder - but ONLY if the filename matches
+        // This is a fallback for initial processing when JPEG wasn't copied to output folder
         const originalBaseName = path.basename(sourcePath, ext);
-        // Extract the original filename pattern (remove shoot number prefix)
-        const match = originalBaseName.match(/_(\d+)$/);
-        if (match) {
-          // Try common camera naming patterns in watch folder
-          const watchFiles = fs.existsSync(this.watchFolder) ? fs.readdirSync(this.watchFolder) : [];
-          const jpegFile = watchFiles.find(f =>
-            f.toLowerCase().endsWith('.jpg') &&
-            (f.includes(originalBaseName) || watchFiles.indexOf(f) !== -1)
-          );
-          if (jpegFile) {
-            workingImagePath = path.join(this.watchFolder, jpegFile);
-            console.log('Found JPEG in watch folder:', workingImagePath);
-          }
+
+        // For reprocessing, the file might be named like "20260120-001_Smith_John_01"
+        // We should NOT grab random JPEGs from the watch folder
+        // Only look for exact filename match (without extension)
+        const watchFiles = fs.existsSync(this.watchFolder) ? fs.readdirSync(this.watchFolder) : [];
+        const jpegFile = watchFiles.find(f => {
+          const watchBaseName = path.basename(f, path.extname(f));
+          // Only match if the base names are exactly equal (case-insensitive)
+          return f.toLowerCase().endsWith('.jpg') &&
+                 watchBaseName.toLowerCase() === originalBaseName.toLowerCase();
+        });
+        if (jpegFile) {
+          workingImagePath = path.join(this.watchFolder, jpegFile);
+          console.log('Found matching JPEG in watch folder:', workingImagePath);
         }
       }
 
