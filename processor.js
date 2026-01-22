@@ -690,17 +690,15 @@ class HeadshotProcessor {
     // HORIZONTAL: Center crop on the face center (nose) - this is the priority
     let cropX = Math.round(faceCenterX - cropWidth / 2);
 
-    // VERTICAL: Position head with exactly 5% gap from top of frame
-    // The nose is roughly 55-60% down from top of head
-    // Distance from nose to top of head (with hair) is ~45% of face height
-    const estimatedHeadTop = faceCenterY - (estimatedFaceHeight * 0.45);
+    // VERTICAL: Position face center at a fixed percentage from top
+    // For good headshot framing, eyes should be ~1/3 from top
+    // Nose (face center) is slightly below eyes, so position at ~35% from top
+    // This naturally gives ~5-10% headroom above the head
+    const facePositionPercent = aspectRatio >= 1 ? 0.38 : 0.35; // Square vs portrait
+    const desiredFaceCenterY = cropHeight * facePositionPercent;
 
-    // 5% headroom from top of frame for all photo types
-    const headroomPercent = 0.05;
-    const desiredHeadTop = cropHeight * headroomPercent;
-
-    // Calculate crop Y so that the estimated head top is at 5% from top
-    let cropY = Math.round(estimatedHeadTop - desiredHeadTop);
+    // Calculate crop Y so face center lands at the desired position
+    let cropY = Math.round(faceCenterY - desiredFaceCenterY);
 
     // Clamp to safe bounds (with edge margin) to avoid backdrop corners
     if (cropX < edgeMargin) {
