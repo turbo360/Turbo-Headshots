@@ -796,11 +796,23 @@ ipcMain.handle('get-session-folders', () => {
       const folderPath = path.join(outputFolder, dirent.name);
       const files = fs.readdirSync(folderPath);
 
-      // Count RAW and processed files
+      // Count RAW files
       const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
       const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
-      const processedJpgs = files.filter(f => f.endsWith('.jpg') && !f.includes('_temp') && !f.includes('_corrected'));
-      const processedPngs = files.filter(f => f.endsWith('.png'));
+
+      // Check Processed subfolder for output files
+      const processedFolder = path.join(folderPath, 'Processed');
+      const processedFiles = fs.existsSync(processedFolder) ? fs.readdirSync(processedFolder) : [];
+      const processedJpgs = processedFiles.filter(f => f.endsWith('.jpg'));
+      const processedPngs = processedFiles.filter(f => f.endsWith('.png'));
+
+      // Count how many RAW files have been processed
+      let processedRawCount = 0;
+      for (const rawFile of rawFiles) {
+        const baseName = path.basename(rawFile, path.extname(rawFile));
+        const hasOutput = processedFiles.some(f => f.startsWith(baseName + '-'));
+        if (hasOutput) processedRawCount++;
+      }
 
       // Parse folder name for shoot number and name
       const match = dirent.name.match(/^(\d{8}-\d{3})_(.+)$/);
@@ -811,9 +823,9 @@ ipcMain.handle('get-session-folders', () => {
         shootNumber: match ? match[1] : dirent.name,
         personName: match ? match[2].replace(/_/g, ' ') : dirent.name,
         rawCount: rawFiles.length,
-        processedCount: processedJpgs.length,
+        processedCount: processedRawCount,
         hasTransparent: processedPngs.length > 0,
-        needsProcessing: rawFiles.length > 0 && processedJpgs.length < rawFiles.length
+        needsProcessing: rawFiles.length > 0 && processedRawCount < rawFiles.length
       };
     })
     .filter(f => f.rawCount > 0) // Only show folders with photos
@@ -839,7 +851,10 @@ ipcMain.handle('reprocess-folder', async (event, folderPath) => {
   // Find all RAW/JPEG files that haven't been processed yet
   const files = fs.readdirSync(folderPath);
   const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
-  const jpegExtensions = ['.jpg', '.jpeg'];
+
+  // Check Processed subfolder for already-processed files
+  const processedFolder = path.join(folderPath, 'Processed');
+  const processedFiles = fs.existsSync(processedFolder) ? fs.readdirSync(processedFolder) : [];
 
   // Get RAW files
   const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
@@ -850,13 +865,14 @@ ipcMain.handle('reprocess-folder', async (event, folderPath) => {
     const baseName = path.basename(rawFile, path.extname(rawFile));
     const sourcePath = path.join(folderPath, rawFile);
 
-    // Check if already processed (has corresponding .jpg that's not the source)
-    const hasProcessedJpg = files.some(f =>
-      f === `${baseName}.jpg` && !jpegExtensions.includes(path.extname(rawFile).toLowerCase())
+    // Check if already processed by looking for output files in Processed folder
+    // Files are named: baseName-4x5.jpg, baseName-SQR.jpg, etc.
+    const hasProcessedOutput = processedFiles.some(f =>
+      f.startsWith(baseName + '-') && (f.endsWith('.jpg') || f.endsWith('.png'))
     );
 
     // Skip if already has processed outputs
-    if (hasProcessedJpg && files.includes(`${baseName}.png`)) {
+    if (hasProcessedOutput) {
       continue;
     }
 
@@ -888,7 +904,6 @@ ipcMain.handle('reprocess-all-folders', async () => {
   }
 
   const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
-  const jpegExtensions = ['.jpg', '.jpeg'];
 
   let totalQueued = 0;
   let foldersProcessed = 0;
@@ -912,19 +927,24 @@ ipcMain.handle('reprocess-all-folders', async () => {
 
     if (rawFiles.length === 0) continue;
 
+    // Check Processed subfolder for already-processed files
+    const processedFolder = path.join(folder.path, 'Processed');
+    const processedFiles = fs.existsSync(processedFolder) ? fs.readdirSync(processedFolder) : [];
+
     let folderQueued = 0;
 
     for (const rawFile of rawFiles) {
       const baseName = path.basename(rawFile, path.extname(rawFile));
       const sourcePath = path.join(folder.path, rawFile);
 
-      // Check if already processed (has corresponding enhanced files)
-      const hasProcessedJpg = files.some(f =>
-        f === `${baseName}.jpg` && !jpegExtensions.includes(path.extname(rawFile).toLowerCase())
+      // Check if already processed by looking for output files in Processed folder
+      // Files are named: baseName-4x5.jpg, baseName-SQR.jpg, etc.
+      const hasProcessedOutput = processedFiles.some(f =>
+        f.startsWith(baseName + '-') && (f.endsWith('.jpg') || f.endsWith('.png'))
       );
 
       // Skip if already has processed outputs
-      if (hasProcessedJpg && files.includes(`${baseName}.png`)) {
+      if (hasProcessedOutput) {
         continue;
       }
 
