@@ -626,6 +626,16 @@
       </div>
 
       <div class="enhancement-group">
+        <label>Shine Removal</label>
+        <select id="shineRemoval" class="enhancement-select" onchange="saveEnhancementOptions()">
+          <option value="off">Off</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+
+      <div class="enhancement-group">
         <label>Upscaling</label>
         <select id="upscaling" class="enhancement-select" onchange="saveEnhancementOptions()">
           <option value="off">Off</option>
@@ -1106,6 +1116,7 @@
       outputSquare: true,
       faceEnhancement: 'medium',
       skinSmoothing: 'off',
+      shineRemoval: 'off',
       upscaling: 'off',
       backgroundRemoval: true,
       backgroundColor: ''
@@ -1193,6 +1204,7 @@
       // Enhancement dropdowns
       document.getElementById('faceEnhancement').value = aiSettings.faceEnhancement || 'medium';
       document.getElementById('skinSmoothing').value = aiSettings.skinSmoothing || 'off';
+      document.getElementById('shineRemoval').value = aiSettings.shineRemoval || 'off';
       document.getElementById('upscaling').value = aiSettings.upscaling || 'off';
 
       // Background options
@@ -1207,6 +1219,7 @@
         outputSquare: document.getElementById('outputSquare').checked,
         faceEnhancement: document.getElementById('faceEnhancement').value,
         skinSmoothing: document.getElementById('skinSmoothing').value,
+        shineRemoval: document.getElementById('shineRemoval').value,
         upscaling: document.getElementById('upscaling').value,
         backgroundRemoval: document.getElementById('backgroundRemoval').checked,
         backgroundColor: document.getElementById('backgroundColor').value.trim()

@@ -31,6 +31,7 @@ let aiSettings = {
   // Enhancement options (off, low, medium, high)
   faceEnhancement: 'medium',
   skinSmoothing: 'off',
+  shineRemoval: 'off',       // off, low, medium, high - reduces oily skin shine
   // Upscaling (off, 2x, 4x)
   upscaling: 'off',
   // Background options
@@ -328,6 +329,7 @@ function createWindow() {
       // Scalable enhancement options
       aiSettings.faceEnhancement = settings.faceEnhancement || 'medium';
       aiSettings.skinSmoothing = settings.skinSmoothing || 'off';
+      aiSettings.shineRemoval = settings.shineRemoval || 'off';
       aiSettings.upscaling = settings.upscaling || 'off';
       aiSettings.backgroundRemoval = settings.backgroundRemoval !== false;
       aiSettings.backgroundColor = settings.backgroundColor || '';
@@ -362,6 +364,7 @@ function createWindow() {
         outputSquare: aiSettings.outputSquare,
         faceEnhancement: aiSettings.faceEnhancement,
         skinSmoothing: aiSettings.skinSmoothing,
+        shineRemoval: aiSettings.shineRemoval,
         upscaling: aiSettings.upscaling,
         backgroundRemoval: aiSettings.backgroundRemoval,
         backgroundColor: aiSettings.backgroundColor
@@ -480,6 +483,7 @@ ipcMain.handle('get-ai-settings', () => {
     outputSquare: aiSettings.outputSquare,
     faceEnhancement: aiSettings.faceEnhancement,
     skinSmoothing: aiSettings.skinSmoothing,
+    shineRemoval: aiSettings.shineRemoval,
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
     backgroundColor: aiSettings.backgroundColor
@@ -520,6 +524,9 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   if (settings.skinSmoothing !== undefined) {
     aiSettings.skinSmoothing = settings.skinSmoothing;
   }
+  if (settings.shineRemoval !== undefined) {
+    aiSettings.shineRemoval = settings.shineRemoval;
+  }
   if (settings.upscaling !== undefined) {
     aiSettings.upscaling = settings.upscaling;
   }
@@ -537,6 +544,7 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
       outputSquare: aiSettings.outputSquare,
       faceEnhancement: aiSettings.faceEnhancement,
       skinSmoothing: aiSettings.skinSmoothing,
+      shineRemoval: aiSettings.shineRemoval,
       upscaling: aiSettings.upscaling,
       backgroundRemoval: aiSettings.backgroundRemoval,
       backgroundColor: aiSettings.backgroundColor
@@ -1154,6 +1162,7 @@ function saveSettings() {
     outputSquare: aiSettings.outputSquare,
     faceEnhancement: aiSettings.faceEnhancement,
     skinSmoothing: aiSettings.skinSmoothing,
+    shineRemoval: aiSettings.shineRemoval,
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
     backgroundColor: aiSettings.backgroundColor,

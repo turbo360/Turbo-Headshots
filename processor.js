@@ -38,6 +38,7 @@ class HeadshotProcessor {
       outputSquare: true,
       faceEnhancement: 'medium',    // off, low, medium, high
       skinSmoothing: 'off',         // off, low, medium, high
+      shineRemoval: 'off',          // off, low, medium, high - reduces oily skin shine
       upscaling: 'off',             // off, 2x, 4x
       backgroundRemoval: true,
       backgroundColor: ''           // Empty = transparent, or hex like '#FFFFFF'
@@ -407,6 +408,15 @@ class HeadshotProcessor {
         }
       }
 
+      // Shine removal if enabled (local processing, no API call)
+      if (opts.shineRemoval && opts.shineRemoval !== 'off') {
+        this.log(`Shine removal (4:5) - ${opts.shineRemoval}...`, 'step');
+        const tempShinePath = path.join(outputFolder, `${baseName}_temp_shine.jpg`);
+        tempFiles.push(tempShinePath);
+        await this.removeShine(portraitImagePath, tempShinePath, opts.shineRemoval);
+        portraitImagePath = tempShinePath;
+      }
+
       // Upscaling if enabled (scalable: off, 2x, 4x)
       if (opts.upscaling && opts.upscaling !== 'off') {
         this.log(`Upscaling (4:5) - ${opts.upscaling}...`, 'step');
@@ -506,6 +516,15 @@ class HeadshotProcessor {
           }
           squareImagePath = tempSkinPath;
         }
+      }
+
+      // Shine removal if enabled (local processing, no API call)
+      if (opts.shineRemoval && opts.shineRemoval !== 'off') {
+        this.log(`Shine removal (square) - ${opts.shineRemoval}...`, 'step');
+        const tempShinePath = path.join(outputFolder, `${baseName}_temp_sq_shine.jpg`);
+        tempFiles.push(tempShinePath);
+        await this.removeShine(squareImagePath, tempShinePath, opts.shineRemoval);
+        squareImagePath = tempShinePath;
       }
 
       // Upscaling if enabled (scalable: off, 2x, 4x)
@@ -914,6 +933,81 @@ class HeadshotProcessor {
         ],
         factors: { r: 1, g: 1, b: 1 }
       };
+    }
+  }
+
+  /**
+   * Remove shine/oily highlights from skin
+   * Uses highlight compression to reduce bright spots without affecting overall image
+   * @param {string} inputPath - Path to input image
+   * @param {string} outputPath - Path for output image
+   * @param {string} intensity - 'off', 'low', 'medium', 'high'
+   */
+  async removeShine(inputPath, outputPath, intensity = 'medium') {
+    if (intensity === 'off') {
+      // Just copy the file
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: true, skipped: true };
+    }
+
+    try {
+      // Intensity settings for highlight compression
+      // Lower gamma = darker highlights, higher threshold = only brightest areas affected
+      const settings = {
+        low: { gamma: 0.95, brightness: 0.98, saturation: 1.02 },
+        medium: { gamma: 0.88, brightness: 0.96, saturation: 1.05 },
+        high: { gamma: 0.80, brightness: 0.94, saturation: 1.08 }
+      };
+
+      const s = settings[intensity] || settings.medium;
+
+      // Read the image
+      const image = sharp(inputPath);
+      const metadata = await image.metadata();
+
+      // Get raw pixel data for highlight detection
+      const { data, info } = await sharp(inputPath)
+        .resize(200, 200, { fit: 'inside' }) // Downsample for analysis
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      // Calculate average brightness to determine if image has shine issues
+      let totalBrightness = 0;
+      let highlightPixels = 0;
+      const pixelCount = info.width * info.height;
+
+      for (let i = 0; i < data.length; i += info.channels) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+        totalBrightness += luminance;
+        if (luminance > 220) highlightPixels++; // Count very bright pixels
+      }
+
+      const avgBrightness = totalBrightness / pixelCount;
+      const highlightRatio = highlightPixels / pixelCount;
+
+      console.log(`Shine removal: avg brightness=${avgBrightness.toFixed(1)}, highlight ratio=${(highlightRatio * 100).toFixed(1)}%`);
+
+      // Apply highlight compression using gamma and modulation
+      // This reduces the brightness of highlights while preserving midtones
+      await sharp(inputPath)
+        .gamma(s.gamma, 3.0) // Apply gamma - first value affects highlights more
+        .modulate({
+          brightness: s.brightness,
+          saturation: s.saturation // Slight saturation boost compensates for brightness reduction
+        })
+        .jpeg({ quality: 95 })
+        .toFile(outputPath);
+
+      console.log(`Shine removal applied (${intensity})`);
+      return { success: true };
+    } catch (error) {
+      console.error('Shine removal failed:', error.message);
+      // On failure, just copy the original
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: false, error: error.message };
     }
   }
 
