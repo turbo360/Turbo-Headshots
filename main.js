@@ -292,12 +292,7 @@ function createWindow() {
               error: result.error
             });
           }
-
-          if (result.success) {
-            processor.log(`Uploaded to gallery: ${filename}`, 'success');
-          } else {
-            processor.log(`Gallery upload failed: ${filename} - ${result.error}`, 'error');
-          }
+          // Log is handled by gallery-upload-result handler in renderer
         } catch (err) {
           console.error(`[Gallery] Upload error for ${filename}:`, err);
           if (mainWindow && !mainWindow.isDestroyed()) {
