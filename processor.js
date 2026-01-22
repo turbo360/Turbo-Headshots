@@ -691,9 +691,9 @@ class HeadshotProcessor {
     let cropX = Math.round(faceCenterX - cropWidth / 2);
 
     // VERTICAL: Position head with exactly 5% gap from top of frame
-    // The face center (nose) is roughly 55-60% down from top of head
-    // So headTop ≈ faceCenterY - (estimatedFaceHeight * 1.0)
-    const estimatedHeadTop = faceCenterY - estimatedFaceHeight;
+    // The nose is roughly 55-60% down from top of head
+    // Distance from nose to top of head (with hair) is ~65% of face height
+    const estimatedHeadTop = faceCenterY - (estimatedFaceHeight * 0.65);
 
     // 5% headroom from top of frame for all photo types
     const headroomPercent = 0.05;
