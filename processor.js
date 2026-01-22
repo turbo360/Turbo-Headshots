@@ -690,27 +690,17 @@ class HeadshotProcessor {
     // HORIZONTAL: Center crop on the face center (nose) - this is the priority
     let cropX = Math.round(faceCenterX - cropWidth / 2);
 
-    // VERTICAL: Position to ensure full head is in frame
-    // The face center (nose) is roughly 60% down from top of head
-    // So headTop ≈ faceCenterY - (estimatedFaceHeight * 0.8)
-    const estimatedHeadTop = faceCenterY - (estimatedFaceHeight * 0.8);
+    // VERTICAL: Position head with exactly 5% gap from top of frame
+    // The face center (nose) is roughly 55-60% down from top of head
+    // So headTop ≈ faceCenterY - (estimatedFaceHeight * 1.0)
+    const estimatedHeadTop = faceCenterY - estimatedFaceHeight;
 
-    // For square crops: position head with good headroom (15% from top)
-    // For portrait crops: position head with more headroom (12% from top)
-    const headroomPercent = aspectRatio === 1 ? 0.15 : 0.12;
+    // 5% headroom from top of frame for all photo types
+    const headroomPercent = 0.05;
     const desiredHeadTop = cropHeight * headroomPercent;
 
-    // Calculate crop Y so that the estimated head top is at the desired position
+    // Calculate crop Y so that the estimated head top is at 5% from top
     let cropY = Math.round(estimatedHeadTop - desiredHeadTop);
-
-    // Ensure there's enough room for the body below
-    // If this pushes the crop too high, adjust
-    const minBodyRoom = aspectRatio === 1 ? cropHeight * 0.35 : cropHeight * 0.45;
-    const availableBodyRoom = (cropY + cropHeight) - faceCenterY;
-    if (availableBodyRoom < minBodyRoom) {
-      // Need more body room, move crop down
-      cropY = Math.round(faceCenterY + minBodyRoom - cropHeight);
-    }
 
     // Clamp to safe bounds (with edge margin) to avoid backdrop corners
     if (cropX < edgeMargin) {
