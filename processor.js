@@ -207,6 +207,9 @@ class HeadshotProcessor {
       return;
     }
 
+    // Clear any previous stop request when starting fresh processing
+    this.stopRequested = false;
+
     this.processing = true;
     this.currentItem = nextItem;
     nextItem.status = 'processing';
