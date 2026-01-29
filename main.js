@@ -7,6 +7,16 @@ const HeadshotProcessor = require('./processor');
 const ReplicateClient = require('./replicate');
 const TurboIQGalleryClient = require('./gallery-client');
 
+// Handle EPIPE errors when console output stream is closed (packaged app without terminal)
+process.stdout?.on?.('error', (err) => {
+  if (err.code === 'EPIPE') return;
+  throw err;
+});
+process.stderr?.on?.('error', (err) => {
+  if (err.code === 'EPIPE') return;
+  throw err;
+});
+
 let mainWindow;
 let watcher;
 let watchFolder = '';

@@ -9,6 +9,16 @@ const sharp = require('sharp');
 const smartcrop = require('smartcrop-sharp');
 const ReplicateClient = require('./replicate');
 
+// Handle EPIPE errors when console output stream is closed (packaged app without terminal)
+process.stdout?.on?.('error', (err) => {
+  if (err.code === 'EPIPE') return;
+  throw err;
+});
+process.stderr?.on?.('error', (err) => {
+  if (err.code === 'EPIPE') return;
+  throw err;
+});
+
 // Headshot cropping constants
 const HEADSHOT_ASPECT_RATIO = 4 / 5;  // Standard headshot ratio (4:5)
 const SQUARE_ASPECT_RATIO = 1;         // 1:1 for square output
