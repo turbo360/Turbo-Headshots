@@ -951,7 +951,7 @@ class HeadshotProcessor {
 
   /**
    * Remove shine/oily highlights from skin
-   * Uses highlight compression to reduce bright spots without affecting overall image
+   * Uses brightness reduction and contrast adjustment to reduce bright spots
    * @param {string} inputPath - Path to input image
    * @param {string} outputPath - Path for output image
    * @param {string} intensity - 'off', 'low', 'medium', 'high'
@@ -964,27 +964,24 @@ class HeadshotProcessor {
     }
 
     try {
-      // Intensity settings for highlight compression
-      // Lower gamma = darker highlights, higher threshold = only brightest areas affected
+      // Intensity settings for highlight reduction
+      // Uses brightness reduction and linear contrast adjustment
+      // to compress highlights without gamma issues
       const settings = {
-        low: { gamma: 0.95, brightness: 0.98, saturation: 1.02 },
-        medium: { gamma: 0.88, brightness: 0.96, saturation: 1.05 },
-        high: { gamma: 0.80, brightness: 0.94, saturation: 1.08 }
+        low: { brightness: 0.97, contrast: 1.02, saturation: 1.02 },
+        medium: { brightness: 0.94, contrast: 1.05, saturation: 1.05 },
+        high: { brightness: 0.90, contrast: 1.08, saturation: 1.08 }
       };
 
       const s = settings[intensity] || settings.medium;
 
-      // Read the image
-      const image = sharp(inputPath);
-      const metadata = await image.metadata();
-
-      // Get raw pixel data for highlight detection
+      // Get raw pixel data for highlight detection (for logging)
       const { data, info } = await sharp(inputPath)
         .resize(200, 200, { fit: 'inside' }) // Downsample for analysis
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      // Calculate average brightness to determine if image has shine issues
+      // Calculate average brightness to log shine level
       let totalBrightness = 0;
       let highlightPixels = 0;
       const pixelCount = info.width * info.height;
@@ -1003,14 +1000,14 @@ class HeadshotProcessor {
 
       console.log(`Shine removal: avg brightness=${avgBrightness.toFixed(1)}, highlight ratio=${(highlightRatio * 100).toFixed(1)}%`);
 
-      // Apply highlight compression using gamma and modulation
-      // This reduces the brightness of highlights while preserving midtones
+      // Apply highlight compression using modulate and linear contrast
+      // This reduces brightness of highlights while preserving overall image quality
       await sharp(inputPath)
-        .gamma(s.gamma, 3.0) // Apply gamma - first value affects highlights more
         .modulate({
           brightness: s.brightness,
-          saturation: s.saturation // Slight saturation boost compensates for brightness reduction
+          saturation: s.saturation
         })
+        .linear(s.contrast, -(128 * (s.contrast - 1))) // Apply contrast around midpoint
         .jpeg({ quality: 95 })
         .toFile(outputPath);
 
@@ -1036,19 +1033,31 @@ class HeadshotProcessor {
 
     // Try dcraw first (better quality, supports more formats)
     try {
-      // dcraw -c -w outputs to stdout, we pipe to convert or save directly
+      // dcraw -T creates a .tiff file in the same directory as the input
+      // Don't use -c (stdout) as it can cause data corruption with pipes
       // -w: use camera white balance
       // -q 3: high quality interpolation
-      // -T: output TIFF
-      const tiffPath = path.join(outputFolder, `${baseName}_temp.tiff`);
-      await execPromise(`dcraw -w -q 3 -T -o 1 -c "${rawPath}" > "${tiffPath}"`);
+      // -T: output TIFF format
+      // -o 1: sRGB colorspace
+      const rawDir = path.dirname(rawPath);
+      const rawName = path.basename(rawPath, path.extname(rawPath));
+      const dcrawTiffOutput = path.join(rawDir, `${rawName}.tiff`);
 
-      if (fs.existsSync(tiffPath)) {
+      // Clean up any existing tiff from previous failed attempts
+      if (fs.existsSync(dcrawTiffOutput)) {
+        try { fs.unlinkSync(dcrawTiffOutput); } catch (e) { /* ignore */ }
+      }
+
+      await execPromise(`dcraw -w -q 3 -T -o 1 "${rawPath}"`);
+
+      if (fs.existsSync(dcrawTiffOutput)) {
         // Convert TIFF to high-quality JPEG using sharp
-        await sharp(tiffPath)
+        // Apply .rotate() to handle EXIF orientation correctly
+        await sharp(dcrawTiffOutput)
+          .rotate() // Auto-orient based on EXIF
           .jpeg({ quality: 95 })
           .toFile(outputPath);
-        fs.unlinkSync(tiffPath);
+        fs.unlinkSync(dcrawTiffOutput);
         console.log('RAW converted via dcraw');
         return outputPath;
       }
