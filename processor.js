@@ -951,7 +951,7 @@ class HeadshotProcessor {
 
   /**
    * Remove shine/oily highlights from skin
-   * Uses brightness reduction and contrast adjustment to reduce bright spots
+   * Uses gamma correction to compress highlights while preserving midtones
    * @param {string} inputPath - Path to input image
    * @param {string} outputPath - Path for output image
    * @param {string} intensity - 'off', 'low', 'medium', 'high'
@@ -964,13 +964,12 @@ class HeadshotProcessor {
     }
 
     try {
-      // Intensity settings for highlight reduction
-      // Uses brightness reduction and linear contrast adjustment
-      // to compress highlights without gamma issues
+      // Intensity settings for highlight compression
+      // Lower gamma = darker highlights, brightness compensates slightly
       const settings = {
-        low: { brightness: 0.97, contrast: 1.02, saturation: 1.02 },
-        medium: { brightness: 0.94, contrast: 1.05, saturation: 1.05 },
-        high: { brightness: 0.90, contrast: 1.08, saturation: 1.08 }
+        low: { gamma: 0.95, brightness: 0.98, saturation: 1.02 },
+        medium: { gamma: 0.88, brightness: 0.96, saturation: 1.05 },
+        high: { gamma: 0.80, brightness: 0.94, saturation: 1.08 }
       };
 
       const s = settings[intensity] || settings.medium;
@@ -1000,14 +999,15 @@ class HeadshotProcessor {
 
       console.log(`Shine removal: avg brightness=${avgBrightness.toFixed(1)}, highlight ratio=${(highlightRatio * 100).toFixed(1)}%`);
 
-      // Apply highlight compression using modulate and linear contrast
-      // This reduces brightness of highlights while preserving overall image quality
+      // Apply highlight compression using gamma and modulation
+      // Gamma < 1 compresses highlights (bright areas get darker)
+      // while preserving midtones and shadows
       await sharp(inputPath)
+        .gamma(s.gamma, 3.0)
         .modulate({
           brightness: s.brightness,
           saturation: s.saturation
         })
-        .linear(s.contrast, -(128 * (s.contrast - 1))) // Apply contrast around midpoint
         .jpeg({ quality: 95 })
         .toFile(outputPath);
 
