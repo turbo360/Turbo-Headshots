@@ -46,7 +46,12 @@ let aiSettings = {
   upscaling: 'off',
   // Background options
   backgroundRemoval: true,
-  backgroundColor: ''        // Empty = transparent, or hex like '#FFFFFF'
+  backgroundColor: '',       // Empty = transparent, or hex like '#FFFFFF'
+  // Image adjustment controls
+  brightness: 1.12,          // 0.90 - 1.30
+  whiteBalanceStrength: 1.0,  // 0.0 (no correction) - 1.0 (full correction)
+  sharpening: 0.8,           // 0.0 - 2.0 sigma
+  jpegQuality: 92            // 70 - 100
 };
 
 // Gallery settings
@@ -343,6 +348,10 @@ function createWindow() {
       aiSettings.upscaling = settings.upscaling || 'off';
       aiSettings.backgroundRemoval = settings.backgroundRemoval !== false;
       aiSettings.backgroundColor = settings.backgroundColor || '';
+      aiSettings.brightness = settings.brightness !== undefined ? settings.brightness : 1.12;
+      aiSettings.whiteBalanceStrength = settings.whiteBalanceStrength !== undefined ? settings.whiteBalanceStrength : 1.0;
+      aiSettings.sharpening = settings.sharpening !== undefined ? settings.sharpening : 0.8;
+      aiSettings.jpegQuality = settings.jpegQuality !== undefined ? settings.jpegQuality : 92;
 
       // Load gallery settings
       gallerySettings.username = settings.galleryUsername || '';
@@ -377,7 +386,11 @@ function createWindow() {
         shineRemoval: aiSettings.shineRemoval,
         upscaling: aiSettings.upscaling,
         backgroundRemoval: aiSettings.backgroundRemoval,
-        backgroundColor: aiSettings.backgroundColor
+        backgroundColor: aiSettings.backgroundColor,
+        brightness: aiSettings.brightness,
+        whiteBalanceStrength: aiSettings.whiteBalanceStrength,
+        sharpening: aiSettings.sharpening,
+        jpegQuality: aiSettings.jpegQuality
       });
       if (watchFolder) {
         processor.setWatchFolder(watchFolder);
@@ -496,7 +509,11 @@ ipcMain.handle('get-ai-settings', () => {
     shineRemoval: aiSettings.shineRemoval,
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
-    backgroundColor: aiSettings.backgroundColor
+    backgroundColor: aiSettings.backgroundColor,
+    brightness: aiSettings.brightness,
+    whiteBalanceStrength: aiSettings.whiteBalanceStrength,
+    sharpening: aiSettings.sharpening,
+    jpegQuality: aiSettings.jpegQuality
   };
 });
 
@@ -546,6 +563,18 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   if (settings.backgroundColor !== undefined) {
     aiSettings.backgroundColor = settings.backgroundColor;
   }
+  if (settings.brightness !== undefined) {
+    aiSettings.brightness = settings.brightness;
+  }
+  if (settings.whiteBalanceStrength !== undefined) {
+    aiSettings.whiteBalanceStrength = settings.whiteBalanceStrength;
+  }
+  if (settings.sharpening !== undefined) {
+    aiSettings.sharpening = settings.sharpening;
+  }
+  if (settings.jpegQuality !== undefined) {
+    aiSettings.jpegQuality = settings.jpegQuality;
+  }
 
   // Update processor with enhancement options
   if (processor) {
@@ -557,7 +586,11 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
       shineRemoval: aiSettings.shineRemoval,
       upscaling: aiSettings.upscaling,
       backgroundRemoval: aiSettings.backgroundRemoval,
-      backgroundColor: aiSettings.backgroundColor
+      backgroundColor: aiSettings.backgroundColor,
+      brightness: aiSettings.brightness,
+      whiteBalanceStrength: aiSettings.whiteBalanceStrength,
+      sharpening: aiSettings.sharpening,
+      jpegQuality: aiSettings.jpegQuality
     });
   }
 
@@ -1176,6 +1209,10 @@ function saveSettings() {
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
     backgroundColor: aiSettings.backgroundColor,
+    brightness: aiSettings.brightness,
+    whiteBalanceStrength: aiSettings.whiteBalanceStrength,
+    sharpening: aiSettings.sharpening,
+    jpegQuality: aiSettings.jpegQuality,
     // Gallery settings
     galleryUsername: gallerySettings.username,
     galleryPassword: gallerySettings.password,

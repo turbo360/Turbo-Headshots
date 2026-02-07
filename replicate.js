@@ -16,11 +16,13 @@ const MAX_API_IMAGE_DIMENSION = 2048;
 const MIN_REQUEST_INTERVAL_MS = 12000;
 
 // Enhancement intensity mappings (off, low, medium, high)
+// Higher fidelity = more faithful to original (less AI alteration)
+// Calibrated for studio-quality input photos
 const INTENSITY_MAP = {
   off: null,
-  low: 0.85,      // Very subtle
-  medium: 0.6,    // Balanced
-  high: 0.3       // Aggressive
+  low: 0.95,      // Barely noticeable - preserves natural skin texture
+  medium: 0.8,    // Gentle restoration
+  high: 0.5       // Noticeable smoothing/restoration
 };
 
 // Upscale factors
@@ -36,27 +38,12 @@ class ReplicateClient {
     this.baseUrl = 'https://api.replicate.com/v1';
     this.lastRequestTime = 0; // For rate limiting
     this.models = {
-      // Background removal - rembg with u2net for better hair/edges
-      backgroundRemoval: 'cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003',
+      // Background removal - BRIA RMBG 2.0 for 256-level alpha masks (better hair edges)
+      backgroundRemoval: 'bria/remove-background',
       // Face restoration - CodeFormer with adjustable fidelity
       faceRestoration: 'sczhou/codeformer:7de2ea26c616d5bf2245ad0d5e24f0ff9a6204578a5c876db53142edd9d2cd56',
       // Upscaling - Real-ESRGAN for high quality upscaling
-      upscaling: 'nightmareai/real-esrgan:f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa',
-      // Skin retouching - using a specialized portrait enhancer
-      skinRetouch: 'tencentarc/gfpgan:0fbacf7afc6c144e5be9767cff80f25aff23e52b0708f17e20f9879b2f21516c',
-      // All-in-one face enhancement with more control
-      faceEnhanceAll: 'daanelson/real-esrgan-a100:f94d7ed4a1f7e1ffed0a4b626e5086fd85bfb82e1127fd4a63f63d8e4e5f9a3e'
-    };
-
-    // Default enhancement settings
-    this.settings = {
-      faceEnhancement: 'medium',      // off, low, medium, high
-      skinSmoothing: 'low',           // off, low, medium, high
-      eyeEnhancement: 'low',          // off, low, medium, high
-      teethWhitening: 'off',          // off, low, medium, high
-      upscaling: 'off',               // off, 2x, 4x
-      backgroundRemoval: true,
-      backgroundColor: null           // null = transparent, or hex color like '#FFFFFF'
+      upscaling: 'nightmareai/real-esrgan:f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa'
     };
   }
 
@@ -75,14 +62,6 @@ class ReplicateClient {
     }
 
     this.lastRequestTime = Date.now();
-  }
-
-  /**
-   * Update enhancement settings
-   */
-  setSettings(settings) {
-    this.settings = { ...this.settings, ...settings };
-    console.log('Replicate client settings updated:', this.settings);
   }
 
   /**
@@ -173,10 +152,10 @@ class ReplicateClient {
       // Wait for rate limit before making API call
       await this.waitForRateLimit();
 
+      // BRIA RMBG 2.0 uses model name (no version hash needed)
       const response = await axios.post(
-        `${this.baseUrl}/predictions`,
+        `${this.baseUrl}/models/${this.models.backgroundRemoval}/predictions`,
         {
-          version: this.models.backgroundRemoval.split(':')[1],
           input: { image: imageUri }
         },
         {
@@ -227,66 +206,10 @@ class ReplicateClient {
           version: this.models.faceRestoration.split(':')[1],
           input: {
             image: imageUri,
-            upscale: 2,
-            face_upsample: true,
+            upscale: 1,
+            face_upsample: false,
             background_enhance: false,
             codeformer_fidelity: fidelity
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      const result = await this.waitForPrediction(response.data.urls.get);
-
-      if (result.success) {
-        return { success: true, url: result.output };
-      }
-
-      return result;
-    } catch (error) {
-      return {
-        success: false,
-        error: error.response?.data?.detail || error.message
-      };
-    }
-  }
-
-  /**
-   * Apply skin smoothing/retouching
-   * Uses GFPGAN with adjusted settings for skin focus
-   * @param {string} imagePath - Path to input image
-   * @param {string} intensity - 'off', 'low', 'medium', 'high'
-   */
-  async smoothSkin(imagePath, intensity = 'low') {
-    if (intensity === 'off') {
-      return { success: true, url: null, skipped: true };
-    }
-
-    try {
-      const imageUri = await this.imageToDataUri(imagePath);
-
-      // GFPGAN scale affects smoothing intensity
-      const scaleMap = { low: 1, medium: 2, high: 2 };
-      const scale = scaleMap[intensity] || 1;
-
-      console.log(`Skin smoothing with scale ${scale} (${intensity})`);
-
-      // Wait for rate limit before making API call
-      await this.waitForRateLimit();
-
-      const response = await axios.post(
-        `${this.baseUrl}/predictions`,
-        {
-          version: this.models.skinRetouch.split(':')[1],
-          input: {
-            img: imageUri,
-            version: 'v1.4',
-            scale: scale
           }
         },
         {
@@ -360,82 +283,6 @@ class ReplicateClient {
       return {
         success: false,
         error: error.response?.data?.detail || error.message
-      };
-    }
-  }
-
-  /**
-   * Apply comprehensive portrait enhancement
-   * Combines multiple enhancements based on settings
-   * @param {string} imagePath - Path to input image
-   * @param {object} options - Enhancement options
-   */
-  async enhancePortrait(imagePath, options = {}) {
-    const opts = { ...this.settings, ...options };
-    const results = { steps: [] };
-
-    try {
-      let currentImagePath = imagePath;
-      let tempFiles = [];
-
-      // Step 1: Face Enhancement (if enabled)
-      if (opts.faceEnhancement !== 'off') {
-        console.log(`Step 1: Face enhancement (${opts.faceEnhancement})`);
-        const faceResult = await this.enhanceFace(currentImagePath, opts.faceEnhancement);
-
-        if (faceResult.success && faceResult.url) {
-          const tempPath = imagePath.replace(/\.[^.]+$/, '_face_temp.jpg');
-          await this.downloadImage(faceResult.url, tempPath);
-          currentImagePath = tempPath;
-          tempFiles.push(tempPath);
-          results.steps.push({ name: 'faceEnhancement', success: true });
-        } else if (!faceResult.skipped) {
-          results.steps.push({ name: 'faceEnhancement', success: false, error: faceResult.error });
-        }
-      }
-
-      // Step 2: Skin Smoothing (if enabled and different from face enhancement)
-      if (opts.skinSmoothing !== 'off' && opts.skinSmoothing !== opts.faceEnhancement) {
-        console.log(`Step 2: Skin smoothing (${opts.skinSmoothing})`);
-        const skinResult = await this.smoothSkin(currentImagePath, opts.skinSmoothing);
-
-        if (skinResult.success && skinResult.url) {
-          const tempPath = imagePath.replace(/\.[^.]+$/, '_skin_temp.jpg');
-          await this.downloadImage(skinResult.url, tempPath);
-          currentImagePath = tempPath;
-          tempFiles.push(tempPath);
-          results.steps.push({ name: 'skinSmoothing', success: true });
-        } else if (!skinResult.skipped) {
-          results.steps.push({ name: 'skinSmoothing', success: false, error: skinResult.error });
-        }
-      }
-
-      // Step 3: Upscaling (if enabled) - do this last for best quality
-      if (opts.upscaling !== 'off') {
-        console.log(`Step 3: Upscaling (${opts.upscaling})`);
-        const upscaleResult = await this.upscaleImage(currentImagePath, opts.upscaling);
-
-        if (upscaleResult.success && upscaleResult.url) {
-          const tempPath = imagePath.replace(/\.[^.]+$/, '_upscale_temp.jpg');
-          await this.downloadImage(upscaleResult.url, tempPath);
-          currentImagePath = tempPath;
-          tempFiles.push(tempPath);
-          results.steps.push({ name: 'upscaling', success: true });
-        } else if (!upscaleResult.skipped) {
-          results.steps.push({ name: 'upscaling', success: false, error: upscaleResult.error });
-        }
-      }
-
-      results.success = true;
-      results.finalImagePath = currentImagePath;
-      results.tempFiles = tempFiles;
-
-      return results;
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        steps: results.steps
       };
     }
   }

@@ -644,6 +644,36 @@
         </select>
       </div>
 
+      <h3 class="settings-section">Image Adjustments</h3>
+
+      <div class="enhancement-group">
+        <label>Brightness <span id="brightnessValue" style="color: #6a89cc;">+12%</span></label>
+        <input type="range" id="brightness" class="enhancement-slider" min="0.90" max="1.30" step="0.01" value="1.12"
+          oninput="updateSliderDisplay('brightness'); saveEnhancementOptions();"
+          style="width: 140px; accent-color: #c83232;">
+      </div>
+
+      <div class="enhancement-group">
+        <label>White Balance Strength <span id="whiteBalanceStrengthValue" style="color: #6a89cc;">100%</span></label>
+        <input type="range" id="whiteBalanceStrength" class="enhancement-slider" min="0" max="1.0" step="0.1" value="1.0"
+          oninput="updateSliderDisplay('whiteBalanceStrength'); saveEnhancementOptions();"
+          style="width: 140px; accent-color: #c83232;">
+      </div>
+
+      <div class="enhancement-group">
+        <label>Sharpening <span id="sharpeningValue" style="color: #6a89cc;">0.8</span></label>
+        <input type="range" id="sharpening" class="enhancement-slider" min="0" max="2.0" step="0.1" value="0.8"
+          oninput="updateSliderDisplay('sharpening'); saveEnhancementOptions();"
+          style="width: 140px; accent-color: #c83232;">
+      </div>
+
+      <div class="enhancement-group">
+        <label>JPEG Quality <span id="jpegQualityValue" style="color: #6a89cc;">92</span></label>
+        <input type="range" id="jpegQuality" class="enhancement-slider" min="70" max="100" step="1" value="92"
+          oninput="updateSliderDisplay('jpegQuality'); saveEnhancementOptions();"
+          style="width: 140px; accent-color: #c83232;">
+      </div>
+
       <h3 class="settings-section">Background Options</h3>
 
       <div class="toggle-group">
@@ -1119,7 +1149,11 @@
       shineRemoval: 'off',
       upscaling: 'off',
       backgroundRemoval: true,
-      backgroundColor: ''
+      backgroundColor: '',
+      brightness: 1.12,
+      whiteBalanceStrength: 1.0,
+      sharpening: 0.8,
+      jpegQuality: 92
     };
 
     let queueStatus = {
@@ -1211,6 +1245,18 @@
       document.getElementById('backgroundRemoval').checked = aiSettings.backgroundRemoval !== false;
       document.getElementById('backgroundColor').value = aiSettings.backgroundColor || '';
       document.getElementById('bgColorPicker').value = aiSettings.backgroundColor || '#FFFFFF';
+
+      // Image adjustment sliders
+      document.getElementById('brightness').value = aiSettings.brightness !== undefined ? aiSettings.brightness : 1.12;
+      document.getElementById('whiteBalanceStrength').value = aiSettings.whiteBalanceStrength !== undefined ? aiSettings.whiteBalanceStrength : 1.0;
+      document.getElementById('sharpening').value = aiSettings.sharpening !== undefined ? aiSettings.sharpening : 0.8;
+      document.getElementById('jpegQuality').value = aiSettings.jpegQuality !== undefined ? aiSettings.jpegQuality : 92;
+
+      // Update slider display values
+      updateSliderDisplay('brightness');
+      updateSliderDisplay('whiteBalanceStrength');
+      updateSliderDisplay('sharpening');
+      updateSliderDisplay('jpegQuality');
     }
 
     async function saveEnhancementOptions() {
@@ -1222,7 +1268,11 @@
         shineRemoval: document.getElementById('shineRemoval').value,
         upscaling: document.getElementById('upscaling').value,
         backgroundRemoval: document.getElementById('backgroundRemoval').checked,
-        backgroundColor: document.getElementById('backgroundColor').value.trim()
+        backgroundColor: document.getElementById('backgroundColor').value.trim(),
+        brightness: parseFloat(document.getElementById('brightness').value),
+        whiteBalanceStrength: parseFloat(document.getElementById('whiteBalanceStrength').value),
+        sharpening: parseFloat(document.getElementById('sharpening').value),
+        jpegQuality: parseInt(document.getElementById('jpegQuality').value)
       };
 
       // Validate at least one output format is selected
@@ -1243,6 +1293,29 @@
       const colorText = document.getElementById('backgroundColor');
       colorText.value = colorPicker.value;
       saveEnhancementOptions();
+    }
+
+    function updateSliderDisplay(sliderId) {
+      const slider = document.getElementById(sliderId);
+      const val = parseFloat(slider.value);
+      const display = document.getElementById(sliderId + 'Value');
+      if (!display) return;
+
+      switch (sliderId) {
+        case 'brightness':
+          const pct = Math.round((val - 1.0) * 100);
+          display.textContent = pct >= 0 ? `+${pct}%` : `${pct}%`;
+          break;
+        case 'whiteBalanceStrength':
+          display.textContent = `${Math.round(val * 100)}%`;
+          break;
+        case 'sharpening':
+          display.textContent = val.toFixed(1);
+          break;
+        case 'jpegQuality':
+          display.textContent = Math.round(val).toString();
+          break;
+      }
     }
 
     function openSettingsModal() {

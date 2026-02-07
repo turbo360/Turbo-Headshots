@@ -22,7 +22,7 @@ process.stderr?.on?.('error', (err) => {
 // Headshot cropping constants
 const HEADSHOT_ASPECT_RATIO = 4 / 5;  // Standard headshot ratio (4:5)
 const SQUARE_ASPECT_RATIO = 1;         // 1:1 for square output
-const FACE_POSITION_FROM_TOP = 0.35;   // Face should be ~35% from top
+const FACE_POSITION_FROM_TOP = 0.33;   // Face should be ~33% from top
 const MIN_HEAD_ROOM = 0.08;            // Minimum 8% space above head
 const SHOULDER_ROOM = 0.25;            // Include ~25% below face for shoulders
 
@@ -47,11 +47,15 @@ class HeadshotProcessor {
       outputPortrait: true,
       outputSquare: true,
       faceEnhancement: 'medium',    // off, low, medium, high
-      skinSmoothing: 'off',         // off, low, medium, high
+      skinSmoothing: 'off',         // off, low, medium, high (local blur+blend)
       shineRemoval: 'off',          // off, low, medium, high - reduces oily skin shine
       upscaling: 'off',             // off, 2x, 4x
       backgroundRemoval: true,
-      backgroundColor: ''           // Empty = transparent, or hex like '#FFFFFF'
+      backgroundColor: '',          // Empty = transparent, or hex like '#FFFFFF'
+      brightness: 1.12,             // 0.90 - 1.30
+      whiteBalanceStrength: 1.0,    // 0.0 (no correction) - 1.0 (full correction)
+      sharpening: 0.8,              // 0.0 - 2.0 sigma
+      jpegQuality: 92               // 70 - 100
     };
 
     // Load persisted queue on startup
@@ -403,22 +407,13 @@ class HeadshotProcessor {
         }
       }
 
-      // Skin smoothing if enabled (scalable: off, low, medium, high)
+      // Skin smoothing if enabled (local blur+blend, no API call)
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
         this.log(`Skin smoothing (4:5) - ${opts.skinSmoothing}...`, 'step');
-        const skinResult = await client.smoothSkin(portraitImagePath, opts.skinSmoothing);
-        if (!skinResult.success && !skinResult.skipped) {
-          throw new Error(`Skin smoothing failed: ${skinResult.error}`);
-        }
-        if (skinResult.url) {
-          const tempSkinPath = path.join(outputFolder, `${baseName}_temp_skin.jpg`);
-          tempFiles.push(tempSkinPath);
-          const downloadResult = await client.downloadImage(skinResult.url, tempSkinPath);
-          if (!downloadResult.success) {
-            throw new Error(`Failed to download skin-smoothed image: ${downloadResult.error}`);
-          }
-          portraitImagePath = tempSkinPath;
-        }
+        const tempSkinPath = path.join(outputFolder, `${baseName}_temp_skin.jpg`);
+        tempFiles.push(tempSkinPath);
+        await this.applySkinSmoothing(portraitImagePath, tempSkinPath, opts.skinSmoothing);
+        portraitImagePath = tempSkinPath;
       }
 
       // Shine removal if enabled (local processing, no API call)
@@ -513,22 +508,13 @@ class HeadshotProcessor {
         }
       }
 
-      // Skin smoothing if enabled (scalable: off, low, medium, high)
+      // Skin smoothing if enabled (local blur+blend, no API call)
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
         this.log(`Skin smoothing (square) - ${opts.skinSmoothing}...`, 'step');
-        const skinResult = await client.smoothSkin(squareImagePath, opts.skinSmoothing);
-        if (!skinResult.success && !skinResult.skipped) {
-          throw new Error(`Square skin smoothing failed: ${skinResult.error}`);
-        }
-        if (skinResult.url) {
-          const tempSkinPath = path.join(outputFolder, `${baseName}_temp_sq_skin.jpg`);
-          tempFiles.push(tempSkinPath);
-          const downloadResult = await client.downloadImage(skinResult.url, tempSkinPath);
-          if (!downloadResult.success) {
-            throw new Error(`Failed to download skin-smoothed square image: ${downloadResult.error}`);
-          }
-          squareImagePath = tempSkinPath;
-        }
+        const tempSkinPath = path.join(outputFolder, `${baseName}_temp_sq_skin.jpg`);
+        tempFiles.push(tempSkinPath);
+        await this.applySkinSmoothing(squareImagePath, tempSkinPath, opts.skinSmoothing);
+        squareImagePath = tempSkinPath;
       }
 
       // Shine removal if enabled (local processing, no API call)
@@ -715,11 +701,11 @@ class HeadshotProcessor {
 
     if (aspectRatio >= 1) {
       // Square - tighter crop for head to upper chest
-      cropHeight = Math.min(estimatedFaceHeight * 3.0, safeHeight);
+      cropHeight = Math.min(estimatedFaceHeight * 2.8, safeHeight);
       cropWidth = cropHeight * aspectRatio;
     } else {
       // Portrait (like 4:5) - tighter crop for head to chest/shoulders
-      cropHeight = Math.min(estimatedFaceHeight * 3.5, safeHeight);
+      cropHeight = Math.min(estimatedFaceHeight * 3.2, safeHeight);
       cropWidth = cropHeight * aspectRatio;
     }
 
@@ -803,29 +789,51 @@ class HeadshotProcessor {
       cropWidth = Math.min(cropWidth, orientedMeta.width - cropX);
       cropHeight = Math.min(cropHeight, orientedMeta.height - cropY);
 
-      // Calculate white balance correction using gray world algorithm
+      // Get configurable settings
+      const opts = this.enhancementOptions;
+      const brightness = opts.brightness !== undefined ? opts.brightness : 1.12;
+      const wbStrength = opts.whiteBalanceStrength !== undefined ? opts.whiteBalanceStrength : 1.0;
+      const sharpenSigma = opts.sharpening !== undefined ? opts.sharpening : 0.8;
+      const jpegQuality = opts.jpegQuality !== undefined ? opts.jpegQuality : 92;
+
+      // Calculate white balance correction
       const whiteBalanceCorrection = await this.calculateWhiteBalance(orientedTempPath);
 
-      // Apply crop and color correction to the already-oriented image
-      await sharp(orientedTempPath)
+      // Interpolate white balance matrix based on strength setting
+      // 0.0 = identity (no correction), 1.0 = full correction
+      const wbMatrix = whiteBalanceCorrection.matrix.map((row, i) =>
+        row.map((val, j) => {
+          const identity = i === j ? 1 : 0;
+          return identity + (val - identity) * wbStrength;
+        })
+      );
+
+      // Build the sharp pipeline with configurable settings
+      let pipeline = sharp(orientedTempPath)
         .extract({
           left: cropX,
           top: cropY,
           width: cropWidth,
           height: cropHeight
         })
-        .recomb(whiteBalanceCorrection.matrix) // Apply white balance correction
+        .recomb(wbMatrix)
         .modulate({
-          saturation: 1.05,  // Subtle saturation boost
-          brightness: 1.12   // Brighten for better exposure
-        })
-        .sharpen({
-          sigma: 0.8,
+          saturation: 1.05,
+          brightness: brightness
+        });
+
+      // Only apply sharpening if sigma > 0
+      if (sharpenSigma > 0) {
+        pipeline = pipeline.sharpen({
+          sigma: sharpenSigma,
           m1: 0.5,
           m2: 0.5
-        })
+        });
+      }
+
+      await pipeline
         .jpeg({
-          quality: 92,
+          quality: jpegQuality,
           mozjpeg: true
         })
         .toFile(outputPath);
@@ -1015,6 +1023,62 @@ class HeadshotProcessor {
       return { success: true };
     } catch (error) {
       console.error('Shine removal failed:', error.message);
+      // On failure, just copy the original
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Apply local skin smoothing using sharp blur+blend
+   * No API call needed - instant processing with controllable intensity
+   * @param {string} inputPath - Path to input image
+   * @param {string} outputPath - Path for output image
+   * @param {string} intensity - 'off', 'low', 'medium', 'high'
+   */
+  async applySkinSmoothing(inputPath, outputPath, intensity = 'medium') {
+    if (intensity === 'off') {
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: true, skipped: true };
+    }
+
+    try {
+      // Opacity of blurred layer over original
+      const opacityMap = {
+        low: 0.15,     // Very subtle smoothing
+        medium: 0.30,  // Moderate smoothing
+        high: 0.50     // Strong smoothing
+      };
+
+      const opacity = opacityMap[intensity] || 0.30;
+
+      // Get image dimensions to calculate blur radius proportional to size
+      const metadata = await sharp(inputPath).metadata();
+      const shortDim = Math.min(metadata.width, metadata.height);
+      // Blur radius ~0.7% of shorter dimension (e.g., 7px for a 1000px image)
+      const blurRadius = Math.max(3, Math.round(shortDim * 0.007));
+
+      console.log(`Skin smoothing (local): opacity=${opacity}, blur=${blurRadius}px (${intensity})`);
+
+      // Create blurred version
+      const blurredBuffer = await sharp(inputPath)
+        .blur(blurRadius)
+        .toBuffer();
+
+      // Composite blurred layer over original with opacity
+      await sharp(inputPath)
+        .composite([{
+          input: blurredBuffer,
+          blend: 'over',
+          opacity: opacity
+        }])
+        .jpeg({ quality: 95 })
+        .toFile(outputPath);
+
+      console.log(`Skin smoothing applied (${intensity})`);
+      return { success: true };
+    } catch (error) {
+      console.error('Skin smoothing failed:', error.message);
       // On failure, just copy the original
       fs.copyFileSync(inputPath, outputPath);
       return { success: false, error: error.message };
