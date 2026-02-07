@@ -847,9 +847,9 @@ ipcMain.handle('get-session-folders', () => {
       const folderPath = path.join(outputFolder, dirent.name);
       const files = fs.readdirSync(folderPath);
 
-      // Count RAW files
+      // Count RAW files (skip macOS resource fork ._ files)
       const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
-      const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+      const rawFiles = files.filter(f => !f.startsWith('._') && rawExtensions.includes(path.extname(f).toLowerCase()));
 
       // Check Processed subfolder for output files
       const processedFolder = path.join(folderPath, 'Processed');
@@ -907,8 +907,8 @@ ipcMain.handle('reprocess-folder', async (event, folderPath) => {
   const processedFolder = path.join(folderPath, 'Processed');
   const processedFiles = fs.existsSync(processedFolder) ? fs.readdirSync(processedFolder) : [];
 
-  // Get RAW files
-  const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+  // Get RAW files (skip macOS resource fork ._ files)
+  const rawFiles = files.filter(f => !f.startsWith('._') && rawExtensions.includes(path.extname(f).toLowerCase()));
 
   let queuedCount = 0;
 
@@ -974,7 +974,8 @@ ipcMain.handle('reprocess-all-folders', async () => {
 
   for (const folder of folders) {
     const files = fs.readdirSync(folder.path);
-    const rawFiles = files.filter(f => rawExtensions.includes(path.extname(f).toLowerCase()));
+    // Skip macOS resource fork ._ files
+    const rawFiles = files.filter(f => !f.startsWith('._') && rawExtensions.includes(path.extname(f).toLowerCase()));
 
     if (rawFiles.length === 0) continue;
 
@@ -1054,11 +1055,11 @@ ipcMain.handle('save-session', async (event, data) => {
     fs.mkdirSync(personFolder, { recursive: true });
   }
 
-  // Count existing files to generate photo number (only count RAW files to avoid double-counting)
+  // Count existing files to generate photo number (only count RAW files, skip ._ resource forks)
   const rawExtensions = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
   const existingFiles = fs.readdirSync(personFolder).filter(f => {
     const fileExt = path.extname(f).toLowerCase();
-    return f.startsWith(shootNumber) && rawExtensions.includes(fileExt);
+    return !f.startsWith('._') && f.startsWith(shootNumber) && rawExtensions.includes(fileExt);
   });
   const photoNum = String(existingFiles.length + 1).padStart(2, '0');
 
