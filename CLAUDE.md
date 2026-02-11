@@ -164,6 +164,8 @@ Database: MongoDB (turbo_iq_production)
 ### Local Development
 
 ```bash
+cd turbo-headshots
+
 # Install dependencies
 npm install
 
@@ -369,7 +371,13 @@ tail -100 /home/turbo/turbo-iq/logs/backend.log
 | 1.3.x | 2025-11 | Smart crop, color correction |
 | 1.0.0 | 2025-10 | Initial release |
 
-## Repository Links
+## Repository
 
-- **Turbo Headshots:** https://github.com/turbo360/Turbo-Headshots
-- **Turbo IQ:** https://github.com/turbo360/TURBO-IQ
+This project is part of the Turbo 360 monorepo (`turbo360/Turbo.net.au`) in the `turbo-headshots/` subfolder.
+
+| Property | Value |
+|----------|-------|
+| Monorepo | https://github.com/turbo360/Turbo.net.au |
+| Subfolder | `turbo-headshots/` |
+| Original Repo (archived) | https://github.com/turbo360/Turbo-Headshots |
+| Related | Turbo IQ (`turbo-iq/`) |
