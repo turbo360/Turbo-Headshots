@@ -333,8 +333,11 @@ This server hosts multiple websites. Only modify files within `/home/turbo/turbo
 ### Common Issues
 
 **"No JPEG available for RAW processing"**
-- Enable RAW+JPEG mode on camera
-- Or install `dcraw` for RAW conversion: `brew install dcraw`
+- Enable RAW+JPEG mode on camera (fastest path), OR
+- Install RAW tools: `brew install exiftool dcraw`
+  - `exiftool` extracts the camera's embedded full-res JPEG — works for all modern RAW formats (Nikon Z6_3 NEF, Sony ARW, Canon CR3, Panasonic RW2, etc.)
+  - `dcraw` (last released 2018) is a fallback for older cameras; it produces garbled output on newer sensors like the Nikon Z6_3.
+- macOS GUI apps don't inherit Homebrew's `/opt/homebrew/bin` PATH; the app uses absolute paths to find these tools.
 
 **Gallery upload fails with 401**
 - Token expired - re-login in Gallery modal

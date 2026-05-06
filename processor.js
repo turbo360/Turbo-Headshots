@@ -344,7 +344,7 @@ class HeadshotProcessor {
           tempFileCreated = true;
           console.log('Converted RAW to JPEG:', workingImagePath);
         } else {
-          throw new Error('No JPEG available and RAW conversion failed. Please enable JPEG+RAW mode on camera, or install dcraw for RAW processing.');
+          throw new Error('No JPEG available and RAW conversion failed. Please enable JPEG+RAW mode on camera, or install exiftool (recommended) / dcraw: brew install exiftool dcraw');
         }
       }
     } else {
@@ -1095,7 +1095,30 @@ class HeadshotProcessor {
 
     const outputPath = path.join(outputFolder, `${baseName}_converted.jpg`);
 
-    // Try dcraw first (better quality, supports more formats)
+    // GUI-launched Electron apps on macOS don't inherit Homebrew's PATH
+    const findBin = (name) => {
+      const candidates = [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name];
+      return candidates.find(p => p === name || fs.existsSync(p)) || name;
+    };
+    const dcrawBin = findBin('dcraw');
+    const exiftoolBin = findBin('exiftool');
+
+    // Try exiftool first - extracts the full-res embedded JPEG that the camera baked in.
+    // Works for modern cameras (Nikon Z6_3, etc.) where dcraw 9.28 produces garbled output.
+    try {
+      await execPromise(`"${exiftoolBin}" -b -JpgFromRaw "${rawPath}" > "${outputPath}"`);
+      if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100000) {
+        console.log('RAW converted via exiftool (embedded JPEG)');
+        return outputPath;
+      } else if (fs.existsSync(outputPath)) {
+        // Empty/tiny file - extraction failed, remove and fall through
+        try { fs.unlinkSync(outputPath); } catch (e) { /* ignore */ }
+      }
+    } catch (err) {
+      console.log('exiftool not available or no embedded JPEG:', err.message);
+    }
+
+    // Try dcraw next (works for older cameras dcraw 9.28 still supports)
     try {
       // dcraw -T creates a .tiff file in the same directory as the input
       // Don't use -c (stdout) as it can cause data corruption with pipes
@@ -1112,7 +1135,7 @@ class HeadshotProcessor {
         try { fs.unlinkSync(dcrawTiffOutput); } catch (e) { /* ignore */ }
       }
 
-      await execPromise(`dcraw -w -q 3 -T -o 1 "${rawPath}"`);
+      await execPromise(`"${dcrawBin}" -w -q 3 -T -o 1 "${rawPath}"`);
 
       if (fs.existsSync(dcrawTiffOutput)) {
         // Convert TIFF to high-quality JPEG using sharp

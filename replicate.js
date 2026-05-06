@@ -11,9 +11,12 @@ const sharp = require('sharp');
 // Max dimension for images sent to API (larger images are resized)
 const MAX_API_IMAGE_DIMENSION = 2048;
 
-// Rate limiting: 6 requests per minute for accounts with < $5 credit
-// We'll use 12 seconds between requests to be safe (5 per minute)
-const MIN_REQUEST_INTERVAL_MS = 12000;
+// Rate limiting:
+//   - Accounts with $5+ credit: 600 predictions/min (10/sec)
+//   - Accounts with < $5 credit: 6 predictions/min with burst of 1
+// Default to the low-tier safe pace (11s ≈ 5.5/min) so we don't hammer 429s.
+// Top up Replicate credit ≥ $5 to unlock the 600/min tier (drop this to 100ms).
+const MIN_REQUEST_INTERVAL_MS = 11000;
 
 // Enhancement intensity mappings (off, low, medium, high)
 // Higher fidelity = more faithful to original (less AI alteration)
@@ -49,7 +52,6 @@ class ReplicateClient {
 
   /**
    * Rate limiter - waits if needed before making a request
-   * Replicate limits to 6 req/min for accounts with < $5 credit
    */
   async waitForRateLimit() {
     const now = Date.now();
@@ -62,6 +64,34 @@ class ReplicateClient {
     }
 
     this.lastRequestTime = Date.now();
+  }
+
+  /**
+   * POST a prediction with automatic 429 retry.
+   * Replicate's 429 message includes a `resets in ~Ns` hint we use as the wait.
+   */
+  async postPrediction(url, body, maxRetries = 5) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await axios.post(url, body, {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (error) {
+        const status = error.response?.status;
+        const detail = error.response?.data?.detail || '';
+        if (status === 429 && attempt < maxRetries) {
+          const match = detail.match(/resets in ~(\d+)s/i);
+          const waitMs = (match ? parseInt(match[1], 10) : 12) * 1000 + 500;
+          console.log(`429 throttled. Retry ${attempt + 1}/${maxRetries} after ${Math.round(waitMs / 1000)}s...`);
+          await new Promise(r => setTimeout(r, waitMs));
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 
   /**
@@ -96,7 +126,7 @@ class ReplicateClient {
           fit: 'inside',
           withoutEnlargement: true
         })
-        .jpeg({ quality: 92 })
+        .jpeg({ quality: 95 })
         .toBuffer();
     } else {
       buffer = fs.readFileSync(imagePath);
@@ -153,17 +183,9 @@ class ReplicateClient {
       await this.waitForRateLimit();
 
       // BRIA RMBG 2.0 uses model name (no version hash needed)
-      const response = await axios.post(
+      const response = await this.postPrediction(
         `${this.baseUrl}/models/${this.models.backgroundRemoval}/predictions`,
-        {
-          input: { image: imageUri }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
+        { input: { image: imageUri } }
       );
 
       const result = await this.waitForPrediction(response.data.urls.get);
@@ -200,7 +222,7 @@ class ReplicateClient {
       // Wait for rate limit before making API call
       await this.waitForRateLimit();
 
-      const response = await axios.post(
+      const response = await this.postPrediction(
         `${this.baseUrl}/predictions`,
         {
           version: this.models.faceRestoration.split(':')[1],
@@ -210,12 +232,6 @@ class ReplicateClient {
             face_upsample: false,
             background_enhance: false,
             codeformer_fidelity: fidelity
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
           }
         }
       );
@@ -254,7 +270,7 @@ class ReplicateClient {
       // Wait for rate limit before making API call
       await this.waitForRateLimit();
 
-      const response = await axios.post(
+      const response = await this.postPrediction(
         `${this.baseUrl}/predictions`,
         {
           version: this.models.upscaling.split(':')[1],
@@ -262,12 +278,6 @@ class ReplicateClient {
             image: imageUri,
             scale: scaleFactor,
             face_enhance: false  // We handle face separately
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
           }
         }
       );
