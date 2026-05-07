@@ -8,6 +8,7 @@ const path = require('path');
 const sharp = require('sharp');
 const smartcrop = require('smartcrop-sharp');
 const ReplicateClient = require('./replicate');
+const SidecarClient = require('./sidecar-client');
 
 // Handle EPIPE errors when console output stream is closed (packaged app without terminal)
 process.stdout?.on?.('error', (err) => {
@@ -46,20 +47,116 @@ class HeadshotProcessor {
     this.enhancementOptions = {
       outputPortrait: true,
       outputSquare: true,
-      faceEnhancement: 'medium',    // off, low, medium, high
+      faceEnhancement: 'medium',    // off, low, medium, high (local: brightness/saturation/skin softening + sharpen)
       skinSmoothing: 'off',         // off, low, medium, high (local blur+blend)
       shineRemoval: 'off',          // off, low, medium, high - reduces oily skin shine
-      upscaling: 'off',             // off, 2x, 4x
+      eyeEnhancement: 'medium',     // off, low, medium, high (region-targeted sharpen + brightness on eye landmarks)
+      upscaling: 'off',             // off, 2x, 4x (Replicate; off by default — source 24MP is enough)
       backgroundRemoval: true,
       backgroundColor: '',          // Empty = transparent, or hex like '#FFFFFF'
+      transparentPortrait: false,   // generate 4:5 transparent PNG (off by default — most use cases don't need it)
+      transparentSquare: true,      // generate 1:1 transparent PNG (default on for compositing)
+      useBackgroundImage: false,    // composite -SQR-TP onto a chosen background image -> -SQR-BG.jpg
+      backgroundImagePath: '',      // absolute path to user-selected background image
       brightness: 1.12,             // 0.90 - 1.30
       whiteBalanceStrength: 1.0,    // 0.0 (no correction) - 1.0 (full correction)
       sharpening: 0.8,              // 0.0 - 2.0 sigma
       jpegQuality: 92               // 70 - 100
     };
 
+    // Sidecar (Apple Vision face detection + foreground mask + quality checks).
+    // Lazy-initialized on first use so we don't pay startup cost when not needed.
+    this.sidecar = null;
+
     // Load persisted queue on startup
     this.loadQueue();
+  }
+
+  /**
+   * Resolve the path to the rembg binary if installed via pipx/pip.
+   * Returns null if not found — caller falls back to Apple Vision matting.
+   */
+  resolveRembgPath() {
+    const candidates = [
+      `${process.env.HOME}/.local/bin/rembg`,
+      '/opt/homebrew/bin/rembg',
+      '/usr/local/bin/rembg'
+    ];
+    return candidates.find(p => fs.existsSync(p)) || null;
+  }
+
+  /**
+   * Run a high-quality background removal using rembg + BiRefNet portrait model.
+   * Designed for fine hair detail; ~13s per 2095px square. Falls back to the
+   * Swift sidecar's Apple Vision foreground mask if rembg isn't installed.
+   */
+  async removeBackgroundLocal(inputPath, outputPath) {
+    const rembg = this.resolveRembgPath();
+    if (rembg) {
+      const { spawn } = require('child_process');
+      return new Promise((resolve, reject) => {
+        const proc = spawn(rembg, [
+          'i',
+          '-m', 'birefnet-portrait',
+          inputPath,
+          outputPath
+        ], { stdio: ['ignore', 'ignore', 'pipe'] });
+
+        let stderr = '';
+        proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+        const timer = setTimeout(() => {
+          proc.kill('SIGKILL');
+          reject(new Error('rembg timed out (60s)'));
+        }, 60000);
+
+        proc.on('exit', (code) => {
+          clearTimeout(timer);
+          if (code === 0 && fs.existsSync(outputPath)) {
+            resolve();
+          } else {
+            reject(new Error(`rembg exited with code ${code}: ${stderr.slice(0, 200)}`));
+          }
+        });
+      });
+    }
+
+    // Fallback: Apple Vision foreground mask (binary-ish edges, no fine hair detail)
+    console.log('rembg not installed; falling back to Apple Vision foreground mask');
+    return this.getSidecar().foregroundMask(inputPath, outputPath);
+  }
+
+  /**
+   * Resolve the path to the bundled Swift sidecar binary.
+   * Dev: <repo>/sidecar/.build/release/HeadshotSidecar
+   * Packaged: <Resources>/HeadshotSidecar
+   */
+  resolveSidecarPath() {
+    if (this.app.isPackaged) {
+      return path.join(process.resourcesPath, 'HeadshotSidecar');
+    }
+    return path.join(this.app.getAppPath(), 'sidecar', '.build', 'release', 'HeadshotSidecar');
+  }
+
+  /**
+   * Get the (lazily-started) sidecar client.
+   */
+  getSidecar() {
+    if (!this.sidecar) {
+      this.sidecar = new SidecarClient(this.resolveSidecarPath());
+      this.sidecar.start();
+    }
+    return this.sidecar;
+  }
+
+  /**
+   * Stop the sidecar (e.g. on app quit).
+   */
+  stopSidecar() {
+    if (this.sidecar) {
+      this.sidecar.stop();
+      this.sidecar = null;
+    }
   }
 
   /**
@@ -74,7 +171,9 @@ class HeadshotProcessor {
    */
   setApiKey(apiKey) {
     this.apiKey = apiKey;
-    if (apiKey && this.queue.length > 0 && !this.processing) {
+    // Pipeline is now local-first — start processing as long as we have a queue,
+    // regardless of whether a Replicate key is set.
+    if (this.queue.length > 0 && !this.processing && this.processingEnabled) {
       this.processNext();
     }
   }
@@ -84,7 +183,7 @@ class HeadshotProcessor {
    */
   setProcessingEnabled(enabled) {
     this.processingEnabled = enabled;
-    if (enabled && this.apiKey && this.queue.length > 0 && !this.processing) {
+    if (enabled && this.queue.length > 0 && !this.processing) {
       this.processNext();
     }
   }
@@ -155,7 +254,7 @@ class HeadshotProcessor {
     this.notifyStatusUpdate();
 
     // Start processing if not already running
-    if (this.apiKey && this.processingEnabled && !this.processing) {
+    if (this.processingEnabled && !this.processing) {
       this.processNext();
     }
 
@@ -211,7 +310,7 @@ class HeadshotProcessor {
    * Process the next item in the queue
    */
   async processNext() {
-    if (this.processing || !this.apiKey || !this.processingEnabled) {
+    if (this.processing || !this.processingEnabled) {
       return;
     }
 
@@ -242,10 +341,11 @@ class HeadshotProcessor {
       // Trigger completion callback with output files for gallery upload
       if (this.onProcessingComplete) {
         const outputFiles = [
-          nextItem.enhancedJpegPath,        // -4x5.jpg
-          nextItem.transparentPngPath,       // -4x5-TP.png
-          nextItem.enhancedSquarePath,       // -SQR.jpg
-          nextItem.transparentSquarePngPath  // -SQR-TP.png
+          nextItem.enhancedJpegPath,             // -4x5.jpg
+          nextItem.transparentPngPath,            // -4x5-TP.png
+          nextItem.enhancedSquarePath,            // -SQR.jpg
+          nextItem.transparentSquarePngPath,      // -SQR-TP.png
+          nextItem.backgroundCompositeSquarePath  // -SQR-BG.jpg
         ].filter(f => f && fs.existsSync(f));
 
         this.onProcessingComplete({
@@ -389,25 +489,17 @@ class HeadshotProcessor {
 
       let portraitImagePath = croppedPath;
 
-      // Face enhancement if enabled (scalable: off, low, medium, high)
+      // Local face enhancement (subtle skin softening + brightness/saturation lift + detail sharpen).
+      // Replaces the Replicate CodeFormer/GFPGAN call. All in Sharp, ~1s per photo, no network.
       if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
         this.log(`Face enhancement (4:5) - ${opts.faceEnhancement}...`, 'step');
-        const enhanceResult = await client.enhanceFace(croppedPath, opts.faceEnhancement);
-        if (!enhanceResult.success && !enhanceResult.skipped) {
-          throw new Error(`Face enhancement failed: ${enhanceResult.error}`);
-        }
-        if (enhanceResult.url) {
-          const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_enhanced.jpg`);
-          tempFiles.push(tempEnhancedPath);
-          const downloadResult = await client.downloadImage(enhanceResult.url, tempEnhancedPath);
-          if (!downloadResult.success) {
-            throw new Error(`Failed to download enhanced image: ${downloadResult.error}`);
-          }
-          portraitImagePath = tempEnhancedPath;
-        }
+        const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_enhanced.jpg`);
+        tempFiles.push(tempEnhancedPath);
+        await this.applyLocalFaceEnhancement(portraitImagePath, tempEnhancedPath, opts.faceEnhancement);
+        portraitImagePath = tempEnhancedPath;
       }
 
-      // Skin smoothing if enabled (local blur+blend, no API call)
+      // Skin smoothing if enabled (additional pass on top of face enhancement)
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
         this.log(`Skin smoothing (4:5) - ${opts.skinSmoothing}...`, 'step');
         const tempSkinPath = path.join(outputFolder, `${baseName}_temp_skin.jpg`);
@@ -416,7 +508,7 @@ class HeadshotProcessor {
         portraitImagePath = tempSkinPath;
       }
 
-      // Shine removal if enabled (local processing, no API call)
+      // Shine removal if enabled (local)
       if (opts.shineRemoval && opts.shineRemoval !== 'off') {
         this.log(`Shine removal (4:5) - ${opts.shineRemoval}...`, 'step');
         const tempShinePath = path.join(outputFolder, `${baseName}_temp_shine.jpg`);
@@ -425,7 +517,22 @@ class HeadshotProcessor {
         portraitImagePath = tempShinePath;
       }
 
-      // Upscaling if enabled (scalable: off, 2x, 4x)
+      // Eye enhancement (region-targeted sharpen + brightness using landmarks)
+      if (opts.eyeEnhancement && opts.eyeEnhancement !== 'off') {
+        this.log(`Eye enhancement (4:5) - ${opts.eyeEnhancement}...`, 'step');
+        const tempEyePath = path.join(outputFolder, `${baseName}_temp_eyes.jpg`);
+        tempFiles.push(tempEyePath);
+        try {
+          const cropFaceData = await this.getSidecar().detectFace(portraitImagePath);
+          await this.applyEyeEnhancement(portraitImagePath, tempEyePath, cropFaceData, opts.eyeEnhancement);
+          portraitImagePath = tempEyePath;
+        } catch (err) {
+          console.log(`Eye enhancement skipped: ${err.message}`);
+        }
+      }
+
+      // Upscaling: kept for compatibility if user explicitly asks; uses Replicate when set.
+      // For local processing, leave at 'off' — source 24MP is already plenty for any output use.
       if (opts.upscaling && opts.upscaling !== 'off') {
         this.log(`Upscaling (4:5) - ${opts.upscaling}...`, 'step');
         const upscaleResult = await client.upscaleImage(portraitImagePath, opts.upscaling);
@@ -453,29 +560,28 @@ class HeadshotProcessor {
       }
       results.enhancedJpegPath = finalPortraitPath;
 
-      // Background removal if enabled
-      if (opts.backgroundRemoval) {
+      // Background removal — local via Apple Vision (VNGenerateForegroundInstanceMaskRequest).
+      // Replaces the Replicate BRIA call; 0.5–1s/photo on Apple Silicon, no network.
+      if (opts.backgroundRemoval && opts.transparentPortrait) {
         this.log('Removing background (4:5)...', 'step');
-        const bgResult = await client.removeBackground(finalPortraitPath);
-        if (!bgResult.success) {
-          throw new Error(`Background removal failed: ${bgResult.error}`);
-        }
-        // Save with -4x5-TP suffix for transparent
         const transparentPngPath = path.join(processedFolder, `${baseName}-4x5-TP.png`);
-        const pngDownloadResult = await client.downloadImage(bgResult.url, transparentPngPath);
-        if (!pngDownloadResult.success) {
-          throw new Error(`Failed to download transparent PNG: ${pngDownloadResult.error}`);
-        }
-        results.transparentPngPath = transparentPngPath;
+        try {
+          await this.removeBackgroundLocal(finalPortraitPath, transparentPngPath);
+          results.transparentPngPath = transparentPngPath;
 
-        // Add solid background color if specified
-        if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
-          this.log(`Adding background color ${opts.backgroundColor}...`, 'step');
-          const coloredPath = path.join(processedFolder, `${baseName}-4x5-BG.jpg`);
-          const colorResult = await client.addBackgroundColor(transparentPngPath, coloredPath, opts.backgroundColor);
-          if (colorResult.success) {
+          // Add solid background color if specified
+          if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+            this.log(`Adding background color ${opts.backgroundColor}...`, 'step');
+            const coloredPath = path.join(processedFolder, `${baseName}-4x5-BG.jpg`);
+            const hex = opts.backgroundColor.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            await sharp(transparentPngPath).flatten({ background: { r, g, b } }).jpeg({ quality: 95 }).toFile(coloredPath);
             results.coloredJpegPath = coloredPath;
           }
+        } catch (err) {
+          this.log(`Background removal failed: ${err.message}`, 'warning');
         }
       }
     }
@@ -493,22 +599,13 @@ class HeadshotProcessor {
       // Face enhancement if enabled (scalable: off, low, medium, high)
       if (opts.faceEnhancement && opts.faceEnhancement !== 'off') {
         this.log(`Face enhancement (square) - ${opts.faceEnhancement}...`, 'step');
-        const enhanceResult = await client.enhanceFace(squarePath, opts.faceEnhancement);
-        if (!enhanceResult.success && !enhanceResult.skipped) {
-          throw new Error(`Square face enhancement failed: ${enhanceResult.error}`);
-        }
-        if (enhanceResult.url) {
-          const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_sq_enhanced.jpg`);
-          tempFiles.push(tempEnhancedPath);
-          const downloadResult = await client.downloadImage(enhanceResult.url, tempEnhancedPath);
-          if (!downloadResult.success) {
-            throw new Error(`Failed to download enhanced square image: ${downloadResult.error}`);
-          }
-          squareImagePath = tempEnhancedPath;
-        }
+        const tempEnhancedPath = path.join(outputFolder, `${baseName}_temp_sq_enhanced.jpg`);
+        tempFiles.push(tempEnhancedPath);
+        await this.applyLocalFaceEnhancement(squareImagePath, tempEnhancedPath, opts.faceEnhancement);
+        squareImagePath = tempEnhancedPath;
       }
 
-      // Skin smoothing if enabled (local blur+blend, no API call)
+      // Skin smoothing if enabled
       if (opts.skinSmoothing && opts.skinSmoothing !== 'off') {
         this.log(`Skin smoothing (square) - ${opts.skinSmoothing}...`, 'step');
         const tempSkinPath = path.join(outputFolder, `${baseName}_temp_sq_skin.jpg`);
@@ -517,7 +614,7 @@ class HeadshotProcessor {
         squareImagePath = tempSkinPath;
       }
 
-      // Shine removal if enabled (local processing, no API call)
+      // Shine removal if enabled
       if (opts.shineRemoval && opts.shineRemoval !== 'off') {
         this.log(`Shine removal (square) - ${opts.shineRemoval}...`, 'step');
         const tempShinePath = path.join(outputFolder, `${baseName}_temp_sq_shine.jpg`);
@@ -526,7 +623,21 @@ class HeadshotProcessor {
         squareImagePath = tempShinePath;
       }
 
-      // Upscaling if enabled (scalable: off, 2x, 4x)
+      // Eye enhancement (region-targeted)
+      if (opts.eyeEnhancement && opts.eyeEnhancement !== 'off') {
+        this.log(`Eye enhancement (square) - ${opts.eyeEnhancement}...`, 'step');
+        const tempEyePath = path.join(outputFolder, `${baseName}_temp_sq_eyes.jpg`);
+        tempFiles.push(tempEyePath);
+        try {
+          const cropFaceData = await this.getSidecar().detectFace(squareImagePath);
+          await this.applyEyeEnhancement(squareImagePath, tempEyePath, cropFaceData, opts.eyeEnhancement);
+          squareImagePath = tempEyePath;
+        } catch (err) {
+          console.log(`Eye enhancement (square) skipped: ${err.message}`);
+        }
+      }
+
+      // Upscaling if enabled (Replicate; off by default)
       if (opts.upscaling && opts.upscaling !== 'off') {
         this.log(`Upscaling (square) - ${opts.upscaling}...`, 'step');
         const upscaleResult = await client.upscaleImage(squareImagePath, opts.upscaling);
@@ -554,29 +665,45 @@ class HeadshotProcessor {
       }
       results.enhancedSquarePath = finalSquarePath;
 
-      // Background removal if enabled
-      if (opts.backgroundRemoval) {
+      // Background removal (square) — local via Apple Vision
+      if (opts.backgroundRemoval && opts.transparentSquare) {
         this.log('Removing background (square)...', 'step');
-        const bgSquareResult = await client.removeBackground(finalSquarePath);
-        if (!bgSquareResult.success) {
-          throw new Error(`Square background removal failed: ${bgSquareResult.error}`);
-        }
-        // Save with -SQR-TP suffix for transparent
         const transparentSquarePngPath = path.join(processedFolder, `${baseName}-SQR-TP.png`);
-        const squarePngDownloadResult = await client.downloadImage(bgSquareResult.url, transparentSquarePngPath);
-        if (!squarePngDownloadResult.success) {
-          throw new Error(`Failed to download transparent square PNG: ${squarePngDownloadResult.error}`);
-        }
-        results.transparentSquarePngPath = transparentSquarePngPath;
+        try {
+          await this.removeBackgroundLocal(finalSquarePath, transparentSquarePngPath);
+          results.transparentSquarePngPath = transparentSquarePngPath;
 
-        // Add solid background color if specified
-        if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
-          this.log(`Adding background color (square) ${opts.backgroundColor}...`, 'step');
-          const coloredPath = path.join(processedFolder, `${baseName}-SQR-BG.jpg`);
-          const colorResult = await client.addBackgroundColor(transparentSquarePngPath, coloredPath, opts.backgroundColor);
-          if (colorResult.success) {
+          if (opts.backgroundColor && opts.backgroundColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+            this.log(`Adding background color (square) ${opts.backgroundColor}...`, 'step');
+            const coloredPath = path.join(processedFolder, `${baseName}-SQR-BG.jpg`);
+            const hex = opts.backgroundColor.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            await sharp(transparentSquarePngPath).flatten({ background: { r, g, b } }).jpeg({ quality: 95 }).toFile(coloredPath);
             results.coloredSquareJpegPath = coloredPath;
           }
+
+          // Image-based background composite (takes precedence over solid colour fill above)
+          if (opts.useBackgroundImage && opts.backgroundImagePath && fs.existsSync(opts.backgroundImagePath)) {
+            this.log('Compositing background image (square)...', 'step');
+            const bgCompositePath = path.join(processedFolder, `${baseName}-SQR-BG.jpg`);
+            try {
+              const fgMeta = await sharp(transparentSquarePngPath).metadata();
+              const resizedBg = await sharp(opts.backgroundImagePath)
+                .resize(fgMeta.width, fgMeta.height, { fit: 'cover', position: 'centre' })
+                .toBuffer();
+              await sharp(resizedBg)
+                .composite([{ input: transparentSquarePngPath }])
+                .jpeg({ quality: opts.jpegQuality || 92 })
+                .toFile(bgCompositePath);
+              results.backgroundCompositeSquarePath = bgCompositePath;
+            } catch (e) {
+              this.log(`Background composite (square) failed: ${e.message}`, 'warning');
+            }
+          }
+        } catch (err) {
+          this.log(`Background removal (square) failed: ${err.message}`, 'warning');
         }
       }
     }
@@ -602,81 +729,118 @@ class HeadshotProcessor {
    * The nose (center of face) is used as the horizontal center reference
    */
   async detectFaceAndCrop(imagePath) {
-    // First, create a properly oriented temp image for face detection
-    // This ensures smartcrop works with the correct orientation
+    // Apple Vision via the Swift sidecar — returns landmark-driven geometry
+    // in the *oriented* image space (EXIF applied). 76 landmarks per face.
+    const sidecar = this.getSidecar();
+    let result;
+    try {
+      result = await sidecar.detectFace(imagePath);
+    } catch (err) {
+      console.log('Sidecar face detection failed, falling back to smartcrop:', err.message);
+      return this._detectFaceAndCropFallback(imagePath);
+    }
+
+    if (!result.found) {
+      console.log('No face detected by Vision; falling back to smartcrop');
+      return this._detectFaceAndCropFallback(imagePath);
+    }
+
+    const {
+      imageWidth, imageHeight,
+      boundingBox,
+      eyeLineY, noseTipX, noseTipY,
+      estimatedTopOfHead,
+      faceHeight,
+      confidence,
+      yaw, pitch, roll
+    } = result;
+
+    console.log(
+      `Vision face: bb (${Math.round(boundingBox.x)},${Math.round(boundingBox.y)}) ` +
+      `${Math.round(boundingBox.width)}×${Math.round(boundingBox.height)} ` +
+      `eye=${Math.round(eyeLineY)} nose=(${Math.round(noseTipX)},${Math.round(noseTipY)}) ` +
+      `conf=${confidence.toFixed(2)}`
+    );
+
+    // Keep the legacy field names so existing callers continue to work,
+    // but add the new landmark fields for the rewritten cropper.
+    return {
+      imageWidth,
+      imageHeight,
+      faceCenterX: noseTipX,
+      faceCenterY: (boundingBox.y + boundingBox.height / 2),
+      noseCenterX: noseTipX,
+      noseCenterY: noseTipY,
+      estimatedFaceHeight: faceHeight,
+      // New landmark-driven fields
+      eyeLineY,
+      noseTipX,
+      noseTipY,
+      faceBoundingBox: boundingBox,
+      estimatedTopOfHead,
+      confidence,
+      pose: { yaw, pitch, roll }
+    };
+  }
+
+  /**
+   * Legacy smartcrop-based detection — kept as a fallback when the sidecar
+   * fails or no face is detected (e.g. occluded, extreme angle).
+   */
+  async _detectFaceAndCropFallback(imagePath) {
     const metadata = await sharp(imagePath).metadata();
-
-    // Check if image needs rotation based on EXIF orientation
     const needsRotation = metadata.orientation && metadata.orientation > 1;
-
     let width, height, tempPath = null;
 
     if (needsRotation) {
-      // Create a temp file with correct orientation for smartcrop
       tempPath = imagePath.replace(/\.[^.]+$/, `_detect_temp_${Date.now()}.jpg`);
-      await sharp(imagePath)
-        .rotate() // Auto-orient based on EXIF
-        .jpeg({ quality: 95 })
-        .toFile(tempPath);
-
+      await sharp(imagePath).rotate().jpeg({ quality: 95 }).toFile(tempPath);
       const orientedMeta = await sharp(tempPath).metadata();
       width = orientedMeta.width;
       height = orientedMeta.height;
-      console.log(`Image rotated for detection: ${width}x${height} (was ${metadata.width}x${metadata.height}, orientation: ${metadata.orientation})`);
     } else {
       width = metadata.width;
       height = metadata.height;
     }
 
     const imageToCrop = tempPath || imagePath;
-
-    // Step 1: Do a tight face detection to find the actual face region
-    // Use a small square crop to pinpoint the face/nose area
     const faceResult = await smartcrop.crop(imageToCrop, {
-      width: Math.round(Math.min(width, height) * 0.3),  // Small square for precise face detection
+      width: Math.round(Math.min(width, height) * 0.3),
       height: Math.round(Math.min(width, height) * 0.3),
-      boost: [
-        // Heavily boost the upper-center region where faces typically are
-        {
-          x: Math.round(width * 0.25),
-          y: 0,
-          width: Math.round(width * 0.5),
-          height: Math.round(height * 0.5),
-          weight: 2.0
-        }
-      ]
+      boost: [{
+        x: Math.round(width * 0.25),
+        y: 0,
+        width: Math.round(width * 0.5),
+        height: Math.round(height * 0.5),
+        weight: 2.0
+      }]
     });
 
-    // Clean up temp file
     if (tempPath && fs.existsSync(tempPath)) {
       try { fs.unlinkSync(tempPath); } catch (e) { /* ignore */ }
     }
 
-    const faceRegion = faceResult.topCrop;
-
-    // The nose is at the center of the detected face region
-    // This is our primary horizontal reference point
-    const noseCenterX = faceRegion.x + faceRegion.width / 2;
-    const noseCenterY = faceRegion.y + faceRegion.height / 2;
-
-    // Estimate the full face height based on the detected region
-    // A face is roughly as wide as it is tall, so we use the region width
-    const estimatedFaceHeight = faceRegion.width * 1.3; // Face is slightly taller than wide
-
-    console.log(`Face/nose detection: region (${faceRegion.x}, ${faceRegion.y}) ${faceRegion.width}x${faceRegion.height}`);
-    console.log(`Nose center: (${Math.round(noseCenterX)}, ${Math.round(noseCenterY)})`);
+    const r = faceResult.topCrop;
+    const noseCenterX = r.x + r.width / 2;
+    const noseCenterY = r.y + r.height / 2;
+    const estimatedFaceHeight = r.width * 1.3;
+    const eyeLineY = r.y + r.height * 0.4;
 
     return {
       imageWidth: width,
       imageHeight: height,
-      // Nose/face center is the primary horizontal reference
       faceCenterX: noseCenterX,
       faceCenterY: noseCenterY,
       noseCenterX,
       noseCenterY,
       estimatedFaceHeight,
-      smartcropRegion: faceRegion,
-      wasRotated: needsRotation
+      eyeLineY,
+      noseTipX: noseCenterX,
+      noseTipY: noseCenterY,
+      faceBoundingBox: { x: r.x, y: r.y, width: r.width, height: r.height },
+      estimatedTopOfHead: r.y - r.height * 0.2,
+      confidence: 0.5,
+      pose: { yaw: 0, pitch: 0, roll: 0 }
     };
   }
 
@@ -685,56 +849,40 @@ class HeadshotProcessor {
    * Ensures person is centered horizontally in the frame
    */
   async applySmartCropAndCorrection(inputPath, outputPath, faceData, aspectRatio) {
-    const { imageWidth, imageHeight, faceCenterX, faceCenterY, estimatedFaceTop, estimatedFaceHeight } = faceData;
+    const {
+      imageWidth, imageHeight,
+      noseTipX, eyeLineY,
+      faceBoundingBox, estimatedFaceHeight
+    } = faceData;
 
-    // Edge margin: stay this far from image edges to avoid backdrop corners
-    // 5% of the smaller dimension
-    const edgeMargin = Math.round(Math.min(imageWidth, imageHeight) * 0.05);
+    // Pro headshot framing rules:
+    //  - eye line at ~38% from top of crop (rule of thirds; slightly above for portraits)
+    //  - the visible head (chin to top of hair) ≈ 35% of crop height for 4:5,
+    //    50% for square. Vision's bbox covers eyebrows-to-chin (~80% of full head),
+    //    so multiply by 1.25 to estimate full head height.
+    const isSquare = aspectRatio >= 1;
+    const headHeightFactor = 1.25;
+    const fullHeadHeight = (faceBoundingBox?.height || estimatedFaceHeight) * headHeightFactor;
+    const headFractionOfFrame = isSquare ? 0.50 : 0.35;
+    const eyeLineFraction = isSquare ? 0.38 : 0.38;
 
-    // Calculate safe crop area (excluding edge margins)
-    const safeWidth = imageWidth - (edgeMargin * 2);
-    const safeHeight = imageHeight - (edgeMargin * 2);
+    const edgeMargin = Math.round(Math.min(imageWidth, imageHeight) * 0.03);
+    const safeWidth = imageWidth - edgeMargin * 2;
+    const safeHeight = imageHeight - edgeMargin * 2;
 
-    // Calculate crop dimensions based on desired aspect ratio
-    // Tighter framing to avoid backdrop edges
-    let cropHeight, cropWidth;
-
-    if (aspectRatio >= 1) {
-      // Square - tighter crop for head to upper chest
-      cropHeight = Math.min(estimatedFaceHeight * 2.8, safeHeight);
-      cropWidth = cropHeight * aspectRatio;
-    } else {
-      // Portrait (like 4:5) - tighter crop for head to chest/shoulders
-      cropHeight = Math.min(estimatedFaceHeight * 3.2, safeHeight);
-      cropWidth = cropHeight * aspectRatio;
-    }
-
-    // Ensure crop fits within safe area
+    // Crop height sized so the head occupies the desired fraction of the frame.
+    let cropHeight = Math.min(fullHeadHeight / headFractionOfFrame, safeHeight);
+    let cropWidth = cropHeight * aspectRatio;
     if (cropWidth > safeWidth) {
       cropWidth = safeWidth;
       cropHeight = cropWidth / aspectRatio;
     }
-    if (cropHeight > safeHeight) {
-      cropHeight = safeHeight;
-      cropWidth = cropHeight * aspectRatio;
-    }
-
-    // Round dimensions
     cropWidth = Math.round(cropWidth);
     cropHeight = Math.round(cropHeight);
 
-    // HORIZONTAL: Center crop on the face center (nose) - this is the priority
-    let cropX = Math.round(faceCenterX - cropWidth / 2);
-
-    // VERTICAL: Position face center at a fixed percentage from top
-    // For good headshot framing, eyes should be ~1/3 from top
-    // Nose (face center) is slightly below eyes, so position at ~35% from top
-    // This naturally gives ~5-10% headroom above the head
-    const facePositionPercent = aspectRatio >= 1 ? 0.38 : 0.35; // Square vs portrait
-    const desiredFaceCenterY = cropHeight * facePositionPercent;
-
-    // Calculate crop Y so face center lands at the desired position
-    let cropY = Math.round(faceCenterY - desiredFaceCenterY);
+    // Anchor the eye line at eyeLineFraction from top of crop, nose centered horizontally.
+    let cropX = Math.round(noseTipX - cropWidth / 2);
+    let cropY = Math.round(eyeLineY - cropHeight * eyeLineFraction);
 
     // Clamp to safe bounds (with edge margin) to avoid backdrop corners
     if (cropX < edgeMargin) {
@@ -755,7 +903,7 @@ class HeadshotProcessor {
     cropX = Math.max(0, Math.min(cropX, imageWidth - cropWidth));
     cropY = Math.max(0, Math.min(cropY, imageHeight - cropHeight));
 
-    console.log(`Cropping: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) - face center: (${Math.round(faceCenterX)}, ${Math.round(faceCenterY)}) - aspect ratio: ${aspectRatio}`);
+    console.log(`Cropping: ${cropWidth}×${cropHeight} at (${cropX}, ${cropY}) — eye line ${Math.round(eyeLineY)}, nose ${Math.round(noseTipX)}, aspect ${aspectRatio}`);
 
     // First, create a properly oriented version of the image
     // This ensures all subsequent operations use correct coordinates
@@ -1036,6 +1184,144 @@ class HeadshotProcessor {
    * @param {string} outputPath - Path for output image
    * @param {string} intensity - 'off', 'low', 'medium', 'high'
    */
+  /**
+   * Subtle, all-local "face enhancement" — replaces the Replicate CodeFormer/GFPGAN call.
+   * Lightly softens skin via blurred-layer composite, gives a small brightness/saturation lift,
+   * and applies a detail sharpen so eyes and textures stay crisp. ~1s on a 24MP image.
+   *
+   * Intensity scales the strength of each component:
+   *   off    — copy as-is
+   *   low    — barely perceptible (preserves natural skin texture)
+   *   medium — corporate-headshot polish (default)
+   *   high   — softer, more retouched look
+   */
+  async applyLocalFaceEnhancement(inputPath, outputPath, intensity = 'medium') {
+    if (intensity === 'off') {
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: true, skipped: true };
+    }
+
+    // Conservative presets — face enhancement should never make the image
+    // perceptibly blurry. Smoothing is a very subtle pore-softening pass;
+    // the sharpen on top is what should dominate.
+    const presets = {
+      low:    { brightness: 1.02, saturation: 1.02, smoothOpacity: 0.05, sharpenSigma: 1.0, sharpenM2: 0.6 },
+      medium: { brightness: 1.04, saturation: 1.03, smoothOpacity: 0.10, sharpenSigma: 1.2, sharpenM2: 0.8 },
+      high:   { brightness: 1.05, saturation: 1.04, smoothOpacity: 0.18, sharpenSigma: 1.5, sharpenM2: 1.0 }
+    };
+    const p = presets[intensity] || presets.medium;
+
+    const meta = await sharp(inputPath).metadata();
+    const shortDim = Math.min(meta.width, meta.height);
+    const blurRadius = Math.max(3, Math.round(shortDim * 0.005));
+
+    console.log(`Face enhancement (local): intensity=${intensity}, blur=${blurRadius}, brightness=${p.brightness}`);
+
+    // Blurred layer for skin softening — bake the alpha into the buffer because
+    // Sharp's composite `opacity` parameter is ignored on JPEG (no-alpha) buffers
+    // in 0.33.x. ensureAlpha(value) adds a uniform alpha channel so blend: 'over' respects it.
+    const softLayer = await sharp(inputPath)
+      .blur(blurRadius)
+      .ensureAlpha(p.smoothOpacity)
+      .png()
+      .toBuffer();
+
+    await sharp(inputPath)
+      .composite([{ input: softLayer, blend: 'over' }])
+      .modulate({ brightness: p.brightness, saturation: p.saturation })
+      .sharpen({ sigma: p.sharpenSigma, m1: 0.5, m2: p.sharpenM2 })
+      .jpeg({ quality: 95 })
+      .toFile(outputPath);
+
+    return { success: true };
+  }
+
+  /**
+   * Region-targeted eye enhancement.
+   * Builds a soft elliptical mask covering both eyes, then composites a sharpened+brightened
+   * version of the image through the mask so eyes get a subtle "pop" without affecting skin.
+   *
+   * Requires faceData with leftEyeRect / rightEyeRect (run detectFace on the cropped image first).
+   */
+  async applyEyeEnhancement(inputPath, outputPath, faceData, intensity = 'medium') {
+    if (intensity === 'off' || !faceData?.found) {
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: true, skipped: true };
+    }
+
+    const left = faceData.leftEyeRect;
+    const right = faceData.rightEyeRect;
+    if (!left && !right) {
+      fs.copyFileSync(inputPath, outputPath);
+      return { success: true, skipped: true };
+    }
+
+    // Conservative — eye enhancement should never produce a visible halo on skin.
+    // Smaller padFactor keeps the mask tight to the eye contour; lower brightness
+    // boost prevents the bright aura that leaks onto surrounding skin.
+    const presets = {
+      low:    { brightness: 1.02, sharpenSigma: 1.0, sharpenM2: 0.8, padFactor: 1.05 },
+      medium: { brightness: 1.04, sharpenSigma: 1.3, sharpenM2: 1.0, padFactor: 1.15 },
+      high:   { brightness: 1.07, sharpenSigma: 1.7, sharpenM2: 1.4, padFactor: 1.30 }
+    };
+    const p = presets[intensity] || presets.medium;
+
+    const meta = await sharp(inputPath).metadata();
+    const W = meta.width, H = meta.height;
+
+    // Build SVG mask: black background, soft-feathered white ellipses on each eye.
+    // Heavy feather (~1.2% of short dim) blends the effect into the skin imperceptibly.
+    const featherStdDev = Math.round(Math.min(W, H) * 0.012);
+    const ellipseSvg = (rect) => {
+      const cx = rect.x + rect.width / 2;
+      const cy = rect.y + rect.height / 2;
+      const rx = (rect.width / 2) * p.padFactor;
+      const ry = (rect.height / 2) * p.padFactor * 1.2;
+      return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="white" filter="url(#blur)" />`;
+    };
+
+    const ellipses = [left, right].filter(Boolean).map(ellipseSvg).join('');
+    const maskSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs><filter id="blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${featherStdDev}" /></filter></defs>
+      <rect width="${W}" height="${H}" fill="black"/>
+      ${ellipses}
+    </svg>`;
+
+    const maskBuffer = await sharp(Buffer.from(maskSvg)).png().toBuffer();
+
+    // Sharpened+brightened version of the whole image
+    const enhancedBuffer = await sharp(inputPath)
+      .modulate({ brightness: p.brightness, saturation: 1.05 })
+      .sharpen({ sigma: p.sharpenSigma, m1: 0.5, m2: p.sharpenM2 })
+      .toColorspace('srgb')
+      .png()
+      .toBuffer();
+
+    // Apply mask alpha to enhanced layer (only eye regions remain visible)
+    const maskedEnhanced = await sharp(enhancedBuffer)
+      .ensureAlpha()
+      .joinChannel(await sharp(maskBuffer).extractChannel(0).toBuffer(), { raw: { width: W, height: H, channels: 1 } })
+      .png()
+      .toBuffer()
+      .catch(async () => {
+        // Fallback: composite mask via dest-in
+        return sharp(enhancedBuffer)
+          .ensureAlpha()
+          .composite([{ input: maskBuffer, blend: 'dest-in' }])
+          .png()
+          .toBuffer();
+      });
+
+    // Composite masked enhancement over original
+    await sharp(inputPath)
+      .composite([{ input: maskedEnhanced, blend: 'over' }])
+      .jpeg({ quality: 95 })
+      .toFile(outputPath);
+
+    console.log(`Eye enhancement applied (${intensity})`);
+    return { success: true };
+  }
+
   async applySkinSmoothing(inputPath, outputPath, intensity = 'medium') {
     if (intensity === 'off') {
       fs.copyFileSync(inputPath, outputPath);
@@ -1105,9 +1391,16 @@ class HeadshotProcessor {
 
     // Try exiftool first - extracts the full-res embedded JPEG that the camera baked in.
     // Works for modern cameras (Nikon Z6_3, etc.) where dcraw 9.28 produces garbled output.
+    // The embedded preview JPEG strips EXIF metadata, so we copy the Orientation tag back
+    // from the RAW file — otherwise portrait shots come out as landscape sideways.
     try {
       await execPromise(`"${exiftoolBin}" -b -JpgFromRaw "${rawPath}" > "${outputPath}"`);
       if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 100000) {
+        try {
+          await execPromise(`"${exiftoolBin}" -tagsfromfile "${rawPath}" -Orientation -overwrite_original "${outputPath}"`);
+        } catch (e) {
+          console.log('Could not copy orientation from RAW (continuing):', e.message);
+        }
         console.log('RAW converted via exiftool (embedded JPEG)');
         return outputPath;
       } else if (fs.existsSync(outputPath)) {
@@ -1197,7 +1490,7 @@ class HeadshotProcessor {
       this.saveQueue();
       this.notifyStatusUpdate();
 
-      if (this.apiKey && this.processingEnabled && !this.processing) {
+      if (this.processingEnabled && !this.processing) {
         this.processNext();
       }
     }
@@ -1218,7 +1511,7 @@ class HeadshotProcessor {
     this.saveQueue();
     this.notifyStatusUpdate();
 
-    if (this.apiKey && this.processingEnabled && !this.processing) {
+    if (this.processingEnabled && !this.processing) {
       this.processNext();
     }
   }

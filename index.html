@@ -695,6 +695,31 @@
         Leave empty for transparent. Set color to add solid background.
       </p>
 
+      <div class="toggle-group">
+        <label>Composite onto background image (square only)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="useBackgroundImage" onchange="saveEnhancementOptions()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="enhancement-group">
+        <label>Background Image</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="backgroundImagePath" readonly placeholder="No image selected"
+                 class="enhancement-select" style="flex: 1; cursor: default;">
+          <button class="btn btn-secondary" type="button" onclick="pickBackgroundImage()">Choose…</button>
+          <button class="btn btn-secondary" type="button" onclick="clearBackgroundImage()">Clear</button>
+        </div>
+        <div style="margin-top: 8px;">
+          <button class="btn btn-secondary" type="button" onclick="recompositeFolder()">Apply to existing folder…</button>
+        </div>
+      </div>
+      <p style="font-size: 0.75em; color: #666; margin-top: -8px; margin-bottom: 15px;">
+        When enabled, generates an extra <code>-SQR-BG.jpg</code> with your image behind the headshot (cover-cropped to fill).
+        "Apply to existing folder…" recomposites every <code>-SQR-TP.png</code> in a chosen folder using the current background image, without re-running enhancement.
+      </p>
+
       <h3 style="margin: 20px 0 15px 0; font-size: 1em; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">API Configuration</h3>
 
       <div class="form-group">
@@ -798,6 +823,14 @@
             <label>Upload Transparent PNGs</label>
             <label class="toggle-switch">
               <input type="checkbox" id="galleryUploadTransparent" onchange="saveGalleryOptions()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-group">
+            <label>Upload Background Composite (-SQR-BG)</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="galleryUploadBackgroundComposite" onchange="saveGalleryOptions()">
               <span class="toggle-slider"></span>
             </label>
           </div>
@@ -1150,6 +1183,8 @@
       upscaling: 'off',
       backgroundRemoval: true,
       backgroundColor: '',
+      useBackgroundImage: false,
+      backgroundImagePath: '',
       brightness: 1.12,
       whiteBalanceStrength: 1.0,
       sharpening: 0.8,
@@ -1245,6 +1280,8 @@
       document.getElementById('backgroundRemoval').checked = aiSettings.backgroundRemoval !== false;
       document.getElementById('backgroundColor').value = aiSettings.backgroundColor || '';
       document.getElementById('bgColorPicker').value = aiSettings.backgroundColor || '#FFFFFF';
+      document.getElementById('useBackgroundImage').checked = aiSettings.useBackgroundImage === true;
+      document.getElementById('backgroundImagePath').value = aiSettings.backgroundImagePath || '';
 
       // Image adjustment sliders
       document.getElementById('brightness').value = aiSettings.brightness !== undefined ? aiSettings.brightness : 1.12;
@@ -1269,6 +1306,8 @@
         upscaling: document.getElementById('upscaling').value,
         backgroundRemoval: document.getElementById('backgroundRemoval').checked,
         backgroundColor: document.getElementById('backgroundColor').value.trim(),
+        useBackgroundImage: document.getElementById('useBackgroundImage').checked,
+        backgroundImagePath: document.getElementById('backgroundImagePath').value,
         brightness: parseFloat(document.getElementById('brightness').value),
         whiteBalanceStrength: parseFloat(document.getElementById('whiteBalanceStrength').value),
         sharpening: parseFloat(document.getElementById('sharpening').value),
@@ -1293,6 +1332,40 @@
       const colorText = document.getElementById('backgroundColor');
       colorText.value = colorPicker.value;
       saveEnhancementOptions();
+    }
+
+    async function pickBackgroundImage() {
+      const result = await ipcRenderer.invoke('select-background-image');
+      if (result && result.success && result.path) {
+        document.getElementById('backgroundImagePath').value = result.path;
+        // Auto-enable the toggle once an image is chosen
+        document.getElementById('useBackgroundImage').checked = true;
+        saveEnhancementOptions();
+      }
+    }
+
+    function clearBackgroundImage() {
+      document.getElementById('backgroundImagePath').value = '';
+      document.getElementById('useBackgroundImage').checked = false;
+      saveEnhancementOptions();
+    }
+
+    async function recompositeFolder() {
+      const bg = document.getElementById('backgroundImagePath').value;
+      if (!bg) {
+        showToast('Pick a background image first', true);
+        return;
+      }
+      // Persist any pending field changes before main.js reads aiSettings.backgroundImagePath
+      await saveEnhancementOptions();
+      const result = await ipcRenderer.invoke('recomposite-folder');
+      if (!result || result.canceled) return;
+      if (!result.success) {
+        showToast(result.error || 'Recomposite failed', true);
+        return;
+      }
+      const msg = `Recomposite: ${result.ok} ok${result.failed ? `, ${result.failed} failed` : ''} (of ${result.total})`;
+      showToast(msg, !!result.failed);
     }
 
     function updateSliderDisplay(sliderId) {
@@ -1602,6 +1675,7 @@
       uploadPortrait: true,
       uploadSquare: true,
       uploadTransparent: true,
+      uploadBackgroundComposite: true,
       selectedGalleryId: null,
       selectedGalleryName: null
     };
@@ -1634,6 +1708,7 @@
       document.getElementById('galleryUploadPortrait').checked = gallerySettings.uploadPortrait;
       document.getElementById('galleryUploadSquare').checked = gallerySettings.uploadSquare;
       document.getElementById('galleryUploadTransparent').checked = gallerySettings.uploadTransparent;
+      document.getElementById('galleryUploadBackgroundComposite').checked = gallerySettings.uploadBackgroundComposite !== false;
 
       // Update upload stats
       document.getElementById('galleryUploadSuccess').textContent = galleryUploadStats.success;
@@ -1815,11 +1890,12 @@
         autoUpload: document.getElementById('galleryAutoUpload').checked,
         uploadPortrait: document.getElementById('galleryUploadPortrait').checked,
         uploadSquare: document.getElementById('galleryUploadSquare').checked,
-        uploadTransparent: document.getElementById('galleryUploadTransparent').checked
+        uploadTransparent: document.getElementById('galleryUploadTransparent').checked,
+        uploadBackgroundComposite: document.getElementById('galleryUploadBackgroundComposite').checked
       };
 
       // Require at least one file type
-      if (!options.uploadPortrait && !options.uploadSquare && !options.uploadTransparent) {
+      if (!options.uploadPortrait && !options.uploadSquare && !options.uploadTransparent && !options.uploadBackgroundComposite) {
         showToast('Please select at least one file type to upload', true);
         document.getElementById('galleryUploadPortrait').checked = true;
         return;

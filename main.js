@@ -6,6 +6,7 @@ const { autoUpdater } = require('electron-updater');
 const HeadshotProcessor = require('./processor');
 const ReplicateClient = require('./replicate');
 const TurboIQGalleryClient = require('./gallery-client');
+const sharp = require('sharp');
 
 // Handle EPIPE errors when console output stream is closed (packaged app without terminal)
 process.stdout?.on?.('error', (err) => {
@@ -42,11 +43,16 @@ let aiSettings = {
   faceEnhancement: 'medium',
   skinSmoothing: 'off',
   shineRemoval: 'off',       // off, low, medium, high - reduces oily skin shine
+  eyeEnhancement: 'medium',  // off, low, medium, high - region-targeted eye sharpen + brightness
   // Upscaling (off, 2x, 4x)
   upscaling: 'off',
   // Background options
   backgroundRemoval: true,
   backgroundColor: '',       // Empty = transparent, or hex like '#FFFFFF'
+  transparentPortrait: false,// 4:5 transparent PNG (off by default)
+  transparentSquare: true,   // 1:1 transparent PNG (on by default)
+  useBackgroundImage: false, // composite -SQR-TP onto a chosen background image
+  backgroundImagePath: '',   // absolute path to user-selected background image
   // Image adjustment controls
   brightness: 1.12,          // 0.90 - 1.30
   whiteBalanceStrength: 1.0,  // 0.0 (no correction) - 1.0 (full correction)
@@ -62,6 +68,7 @@ let gallerySettings = {
   uploadPortrait: true,
   uploadSquare: true,
   uploadTransparent: true,
+  uploadBackgroundComposite: true,
   lastGalleryId: null,
   lastGalleryName: null
 };
@@ -281,10 +288,12 @@ function createWindow() {
       // Filter files based on upload preferences
       const filesToUpload = data.outputFiles.filter(filePath => {
         const filename = path.basename(filePath);
+        const isSquareBg = filename.includes('-SQR-BG.');
         const isPortrait = filename.includes('-4x5.') && !filename.includes('-TP.');
         const isSquare = filename.includes('-SQR.') && !filename.includes('-TP.');
         const isTransparent = filename.includes('-TP.');
 
+        if (isSquareBg && !gallerySettings.uploadBackgroundComposite) return false;
         if (isTransparent && !gallerySettings.uploadTransparent) return false;
         if (isPortrait && !gallerySettings.uploadPortrait) return false;
         if (isSquare && !gallerySettings.uploadSquare) return false;
@@ -345,9 +354,14 @@ function createWindow() {
       aiSettings.faceEnhancement = settings.faceEnhancement || 'medium';
       aiSettings.skinSmoothing = settings.skinSmoothing || 'off';
       aiSettings.shineRemoval = settings.shineRemoval || 'off';
+      aiSettings.eyeEnhancement = settings.eyeEnhancement || 'medium';
       aiSettings.upscaling = settings.upscaling || 'off';
       aiSettings.backgroundRemoval = settings.backgroundRemoval !== false;
       aiSettings.backgroundColor = settings.backgroundColor || '';
+      aiSettings.transparentPortrait = settings.transparentPortrait === true;
+      aiSettings.transparentSquare = settings.transparentSquare !== false;
+      aiSettings.useBackgroundImage = settings.useBackgroundImage === true;
+      aiSettings.backgroundImagePath = settings.backgroundImagePath || '';
       aiSettings.brightness = settings.brightness !== undefined ? settings.brightness : 1.12;
       aiSettings.whiteBalanceStrength = settings.whiteBalanceStrength !== undefined ? settings.whiteBalanceStrength : 1.0;
       aiSettings.sharpening = settings.sharpening !== undefined ? settings.sharpening : 0.8;
@@ -360,6 +374,7 @@ function createWindow() {
       gallerySettings.uploadPortrait = settings.uploadPortrait !== false;
       gallerySettings.uploadSquare = settings.uploadSquare !== false;
       gallerySettings.uploadTransparent = settings.uploadTransparent !== false;
+      gallerySettings.uploadBackgroundComposite = settings.uploadBackgroundComposite !== false;
       gallerySettings.lastGalleryId = settings.lastGalleryId || null;
       gallerySettings.lastGalleryName = settings.lastGalleryName || null;
 
@@ -387,6 +402,8 @@ function createWindow() {
         upscaling: aiSettings.upscaling,
         backgroundRemoval: aiSettings.backgroundRemoval,
         backgroundColor: aiSettings.backgroundColor,
+        useBackgroundImage: aiSettings.useBackgroundImage,
+        backgroundImagePath: aiSettings.backgroundImagePath,
         brightness: aiSettings.brightness,
         whiteBalanceStrength: aiSettings.whiteBalanceStrength,
         sharpening: aiSettings.sharpening,
@@ -434,7 +451,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (watcher) watcher.close();
+  if (processor) processor.stopSidecar();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (processor) processor.stopSidecar();
 });
 
 app.on('activate', () => {
@@ -489,6 +511,82 @@ ipcMain.handle('select-output-folder', async () => {
   return null;
 });
 
+// Pick a background image for square composite output
+ipcMain.handle('select-background-image', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Background Image',
+    message: 'Choose a background image to composite behind transparent square headshots',
+    filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return { success: false };
+  return { success: true, path: result.filePaths[0] };
+});
+
+// Batch: apply current background image to every -SQR-TP.png inside a chosen folder
+ipcMain.handle('recomposite-folder', async () => {
+  const bgPath = aiSettings.backgroundImagePath;
+  if (!bgPath || !fs.existsSync(bgPath)) {
+    return { success: false, error: 'No valid background image selected. Choose one in Background Options first.' };
+  }
+
+  const dlg = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Folder to Recomposite',
+    message: 'Choose a folder containing -SQR-TP.png files (subfolders are scanned too)'
+  });
+  if (dlg.canceled || !dlg.filePaths.length) return { canceled: true };
+
+  const root = dlg.filePaths[0];
+  const targets = [];
+  function walk(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('-sqr-tp.png')) targets.push(p);
+    }
+  }
+  walk(root);
+
+  if (!targets.length) {
+    return { success: false, error: 'No -SQR-TP.png files found in that folder.' };
+  }
+
+  const log = (message, type = 'info') => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('processing-log', { message, type });
+    }
+  };
+
+  const quality = aiSettings.jpegQuality || 92;
+  log(`Recompositing ${targets.length} file(s) with ${path.basename(bgPath)}...`, 'info');
+
+  let ok = 0, failed = 0;
+  for (const tpPath of targets) {
+    const outPath = tpPath.replace(/-SQR-TP\.png$/i, '-SQR-BG.jpg');
+    try {
+      const fgMeta = await sharp(tpPath).metadata();
+      const resizedBg = await sharp(bgPath)
+        .resize(fgMeta.width, fgMeta.height, { fit: 'cover', position: 'centre' })
+        .toBuffer();
+      await sharp(resizedBg)
+        .composite([{ input: tpPath }])
+        .jpeg({ quality })
+        .toFile(outPath);
+      ok++;
+      log(`Recomposited: ${path.basename(outPath)}`, 'success');
+    } catch (e) {
+      failed++;
+      log(`Failed: ${path.basename(tpPath)} - ${e.message}`, 'error');
+    }
+  }
+
+  log(`Recomposite done: ${ok} ok, ${failed} failed`, failed ? 'info' : 'success');
+  return { success: true, ok, failed, total: targets.length };
+});
+
 // Get current settings
 ipcMain.handle('get-settings', () => {
   return { watchFolder, outputFolder, sessionsFile };
@@ -510,6 +608,10 @@ ipcMain.handle('get-ai-settings', () => {
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
     backgroundColor: aiSettings.backgroundColor,
+    transparentPortrait: aiSettings.transparentPortrait,
+    transparentSquare: aiSettings.transparentSquare,
+    useBackgroundImage: aiSettings.useBackgroundImage,
+    backgroundImagePath: aiSettings.backgroundImagePath,
     brightness: aiSettings.brightness,
     whiteBalanceStrength: aiSettings.whiteBalanceStrength,
     sharpening: aiSettings.sharpening,
@@ -554,6 +656,9 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   if (settings.shineRemoval !== undefined) {
     aiSettings.shineRemoval = settings.shineRemoval;
   }
+  if (settings.eyeEnhancement !== undefined) {
+    aiSettings.eyeEnhancement = settings.eyeEnhancement;
+  }
   if (settings.upscaling !== undefined) {
     aiSettings.upscaling = settings.upscaling;
   }
@@ -562,6 +667,18 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
   }
   if (settings.backgroundColor !== undefined) {
     aiSettings.backgroundColor = settings.backgroundColor;
+  }
+  if (settings.transparentPortrait !== undefined) {
+    aiSettings.transparentPortrait = settings.transparentPortrait;
+  }
+  if (settings.transparentSquare !== undefined) {
+    aiSettings.transparentSquare = settings.transparentSquare;
+  }
+  if (settings.useBackgroundImage !== undefined) {
+    aiSettings.useBackgroundImage = settings.useBackgroundImage;
+  }
+  if (settings.backgroundImagePath !== undefined) {
+    aiSettings.backgroundImagePath = settings.backgroundImagePath;
   }
   if (settings.brightness !== undefined) {
     aiSettings.brightness = settings.brightness;
@@ -584,9 +701,14 @@ ipcMain.handle('set-ai-settings', async (event, settings) => {
       faceEnhancement: aiSettings.faceEnhancement,
       skinSmoothing: aiSettings.skinSmoothing,
       shineRemoval: aiSettings.shineRemoval,
+      eyeEnhancement: aiSettings.eyeEnhancement,
       upscaling: aiSettings.upscaling,
       backgroundRemoval: aiSettings.backgroundRemoval,
       backgroundColor: aiSettings.backgroundColor,
+      transparentPortrait: aiSettings.transparentPortrait,
+      transparentSquare: aiSettings.transparentSquare,
+      useBackgroundImage: aiSettings.useBackgroundImage,
+      backgroundImagePath: aiSettings.backgroundImagePath,
       brightness: aiSettings.brightness,
       whiteBalanceStrength: aiSettings.whiteBalanceStrength,
       sharpening: aiSettings.sharpening,
@@ -677,6 +799,7 @@ ipcMain.handle('get-gallery-settings', () => {
     uploadPortrait: gallerySettings.uploadPortrait,
     uploadSquare: gallerySettings.uploadSquare,
     uploadTransparent: gallerySettings.uploadTransparent,
+    uploadBackgroundComposite: gallerySettings.uploadBackgroundComposite,
     selectedGalleryId: selectedGalleryId,
     selectedGalleryName: selectedGalleryName,
     hasCredentials: !!(gallerySettings.username && gallerySettings.password)
@@ -799,6 +922,9 @@ ipcMain.handle('set-gallery-upload-options', (event, options) => {
   }
   if (options.uploadTransparent !== undefined) {
     gallerySettings.uploadTransparent = options.uploadTransparent;
+  }
+  if (options.uploadBackgroundComposite !== undefined) {
+    gallerySettings.uploadBackgroundComposite = options.uploadBackgroundComposite;
   }
   saveSettings();
 
@@ -1210,6 +1336,10 @@ function saveSettings() {
     upscaling: aiSettings.upscaling,
     backgroundRemoval: aiSettings.backgroundRemoval,
     backgroundColor: aiSettings.backgroundColor,
+    transparentPortrait: aiSettings.transparentPortrait,
+    transparentSquare: aiSettings.transparentSquare,
+    useBackgroundImage: aiSettings.useBackgroundImage,
+    backgroundImagePath: aiSettings.backgroundImagePath,
     brightness: aiSettings.brightness,
     whiteBalanceStrength: aiSettings.whiteBalanceStrength,
     sharpening: aiSettings.sharpening,
@@ -1221,6 +1351,7 @@ function saveSettings() {
     uploadPortrait: gallerySettings.uploadPortrait,
     uploadSquare: gallerySettings.uploadSquare,
     uploadTransparent: gallerySettings.uploadTransparent,
+    uploadBackgroundComposite: gallerySettings.uploadBackgroundComposite,
     lastGalleryId: gallerySettings.lastGalleryId,
     lastGalleryName: gallerySettings.lastGalleryName
   };
