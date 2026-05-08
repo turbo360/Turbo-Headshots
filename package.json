@@ -1,6 +1,6 @@
 {
   "name": "turbo-headshots",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Headshot registration system for tethered photography",
   "main": "main.js",
   "scripts": {
@@ -51,10 +51,19 @@
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
+      "binaries": [
+        "Contents/Resources/HeadshotSidecar"
+      ],
       "notarize": {
         "teamId": "ETURVK9WSA"
       }
     },
+    "extraResources": [
+      {
+        "from": "sidecar/.build/release/HeadshotSidecar",
+        "to": "HeadshotSidecar"
+      }
+    ],
     "dmg": {
       "title": "Turbo Headshots",
       "sign": false,
