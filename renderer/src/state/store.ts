@@ -53,7 +53,7 @@ interface State {
   reviewPersonId: string | null;
   dispatchOpts: DispatchOpts;
   logLines: { msg: string; type: string; at: number }[];
-  updateInfo: { status: string; version?: string } | null;
+  updateInfo: { status: string; version?: string; percent?: number; message?: string } | null;
   version: string;
 
   set: (p: Partial<State>) => void;

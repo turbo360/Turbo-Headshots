@@ -223,6 +223,18 @@ export default function Settings() {
               <div className="muted" style={{ fontSize: 14 }}>The active shoot has no check-in link.</div>
             )}
             <hr className="hairline" style={{ margin: '16px 0' }} />
+            <div className="kicker" style={{ marginBottom: 8 }}>App updates</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <span className="mono" style={{ fontSize: 13 }}>v{s.version}</span>
+              <span className="muted" style={{ fontSize: 13, flex: 1 }}>
+                {s.updateInfo?.status === 'downloading' ? `Downloading v${s.updateInfo.version}… ${s.updateInfo.percent ?? 0}%`
+                  : s.updateInfo?.status === 'downloaded' ? `v${s.updateInfo.version} ready — restart to install`
+                  : s.updateInfo?.status === 'error' ? `Update error: ${s.updateInfo.message}`
+                  : s.updateInfo?.status === 'current' ? 'Up to date'
+                  : 'Checks on launch and every 30 min'}
+              </span>
+              <Button size="sm" variant="secondary" onClick={() => window.turbo.app.checkForUpdates()}>Check now</Button>
+            </div>
             <div className="kicker" style={{ marginBottom: 8 }}>LUMIX Tether</div>
             <div className="muted" style={{ fontSize: 13.5 }}>
               Use PC Tether mode with RAW+JPEG. The watch folder should be Tether's output folder.

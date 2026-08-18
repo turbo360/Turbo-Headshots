@@ -156,15 +156,29 @@ app.whenReady().then(() => {
   ]);
 
   /* ---------- updater ---------- */
-  autoUpdater.autoDownload = true; // renderer banner triggers on 'downloaded'
-  autoUpdater.on('update-available', (info) => push('update-status', { status: 'available', version: info.version }));
+  autoUpdater.autoDownload = true;
+  let updateVersion = null;
+  autoUpdater.on('update-available', (info) => {
+    updateVersion = info.version;
+    push('update-status', { status: 'downloading', version: info.version, percent: 0 });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    push('update-status', { status: 'downloading', version: updateVersion, percent: Math.round(p.percent) });
+  });
+  autoUpdater.on('update-not-available', () => push('update-status', { status: 'current', version: app.getVersion() }));
   autoUpdater.on('update-downloaded', (info) => push('update-status', { status: 'downloaded', version: info.version }));
-  autoUpdater.on('error', (err) => console.log('[updater]', err.message));
+  autoUpdater.on('error', (err) => {
+    fileLog(`UPDATER ${err.message}`);
+    push('update-status', { status: 'error', message: err.message });
+  });
   const updater = {
     check: () => { autoUpdater.checkForUpdates().catch(() => {}); },
     download: () => { autoUpdater.downloadUpdate().catch(() => {}); },
     install: () => autoUpdater.quitAndInstall(),
   };
+  // Shoot-day apps stay open for hours — re-check every 30 minutes, not
+  // just once at boot.
+  setInterval(() => updater.check(), 30 * 60 * 1000);
 
   registerIpc({
     app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater, deliveries,

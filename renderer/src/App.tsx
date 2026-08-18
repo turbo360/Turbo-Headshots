@@ -170,15 +170,23 @@ export default function App() {
         </div>
       )}
 
-      {s.updateInfo?.status === 'downloaded' && (
+      {(s.updateInfo?.status === 'downloaded' || s.updateInfo?.status === 'downloading') && (
         <div style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 90,
           background: 'var(--admin-carbon)', color: '#fff', borderRadius: 12,
           padding: '14px 18px', display: 'flex', gap: 12, alignItems: 'center',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
         }}>
-          <span style={{ fontSize: 14 }}>Update {s.updateInfo.version} ready</span>
-          <Button size="sm" variant="primary" onClick={() => window.turbo.app.installUpdate()}>Restart & install</Button>
+          {s.updateInfo.status === 'downloaded' ? (
+            <>
+              <span style={{ fontSize: 14 }}>Update {s.updateInfo.version} ready</span>
+              <Button size="sm" variant="primary" onClick={() => window.turbo.app.installUpdate()}>Restart & install</Button>
+            </>
+          ) : (
+            <span className="mono" style={{ fontSize: 13 }}>
+              Downloading v{s.updateInfo.version}… {s.updateInfo.percent ?? 0}%
+            </span>
+          )}
         </div>
       )}
     </div>

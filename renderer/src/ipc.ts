@@ -69,7 +69,7 @@ export async function initIpc(): Promise<void> {
     useStore.setState({ batches: await t.batches.list() });
   });
 
-  t.on('update-status', (p) => useStore.setState({ updateInfo: p as { status: string; version?: string } }));
+  t.on('update-status', (p) => useStore.setState({ updateInfo: p as { status: string; version?: string; percent?: number; message?: string } }));
 
   t.on('gallery-upload-result', (p) => {
     const r = p as { success: boolean; filename: string; error?: string | null };
