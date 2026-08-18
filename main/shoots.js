@@ -147,7 +147,7 @@ class ShootsStore {
     const shoot = this.getShoot(person.shootId);
     const base = shoot?.folderPath || this.settings.raw.outputFolder;
     if (!base) return null;
-    const safeName = `${person.lastName}_${person.firstName}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = ([person.lastName, person.firstName].filter(Boolean).join('_') || 'Subject').replace(/[^a-zA-Z0-9_-]/g, '_');
     const folder = path.join(base, `${person.shootNumber}_${safeName}`);
     fs.mkdirSync(folder, { recursive: true });
     this.updatePerson(person.id, (p) => { p.folderPath = folder; });

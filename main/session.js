@@ -101,7 +101,7 @@ class Session {
     const ext = path.extname(sourcePath);
     const isRaw = RAW_EXTS.includes(ext.toLowerCase());
     const shootNumber = person.shootNumber;
-    const safeName = `${person.lastName}_${person.firstName}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = ([person.lastName, person.firstName].filter(Boolean).join('_') || 'Subject').replace(/[^a-zA-Z0-9_-]/g, '_');
 
     // Photo number = count of existing captures for this person + 1 (v1 counted
     // RAW files on disk; the frames record is now authoritative).

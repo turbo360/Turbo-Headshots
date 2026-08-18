@@ -33,6 +33,31 @@ const FRAMING_TO_CROP = {
   original: 'original',
 };
 
+/**
+ * Minimal trim of the model's 4K output to a target aspect — NEVER a zoom.
+ * enhance.turbo.net.au delivers the Nano Banana frame untouched; the model
+ * already composed the requested framing (chest-up etc). Face data is used
+ * only to anchor WHICH side gets trimmed.
+ */
+function aspectTrim(faceData, W, H, ratio) {
+  const current = W / H;
+  if (Math.abs(current - ratio) / ratio < 0.005) {
+    return { left: 0, top: 0, width: W, height: H };
+  }
+  if (current > ratio) {
+    // too wide → trim sides, centred on the face
+    const cropW = Math.round(H * ratio);
+    const anchorX = faceData?.noseTipX ?? W / 2;
+    const left = Math.max(0, Math.min(W - cropW, Math.round(anchorX - cropW / 2)));
+    return { left, top: 0, width: cropW, height: H };
+  }
+  // too tall → trim top/bottom, eye line at ~38% from the top of the crop
+  const cropH = Math.round(W / ratio);
+  const anchorY = faceData?.eyeLineY ?? H * 0.35;
+  const top = Math.max(0, Math.min(H - cropH, Math.round(anchorY - cropH * 0.38)));
+  return { left: 0, top, width: W, height: cropH };
+}
+
 const STAGES = {
   prepare: '01 Prepare · 4096px q95',
   guardIn: '02 Guard in · torso reference',
@@ -174,13 +199,19 @@ async function processRender(item, deps, frameCache) {
     }
   }
 
-  /* ---- 06 CROP + EXPORT ---- */
+  /* ---- 06 EXPORT (parity with enhance.turbo.net.au: the model's frame is
+     the deliverable — aspect versions are minimal trims, never zooms, and
+     nothing is re-sharpened or colour-adjusted) ---- */
   onStage('export', STAGES.export, 82);
   const outputs = [];
-  const jpegQuality = settings.raw.jpegQuality ?? 92;
-  const sharpening = settings.raw.sharpening ?? 0.8;
 
-  // Face-detect on the 4K render (temp file for the sidecar).
+  // The untouched engine output — byte-for-byte what Enhance would deliver
+  // (pixel-locked buffer when that ran).
+  const fullPath = path.join(processedDir, `${baseName}-${slug}-full.jpg`);
+  fs.writeFileSync(fullPath, renderBuf);
+  outputs.push({ path: fullPath, kind: 'full', backdrop: slug });
+
+  // Face-detect on the 4K render — used ONLY to anchor the aspect trims.
   const tmpRender = path.join(os.tmpdir(), `th-render-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`);
   fs.writeFileSync(tmpRender, renderBuf);
   let faceData;
@@ -189,17 +220,23 @@ async function processRender(item, deps, frameCache) {
   } finally {
     try { fs.unlinkSync(tmpRender); } catch { /* ignore */ }
   }
+  const renderMeta = await sharp(renderBuf).metadata();
+  const rW = renderMeta.width ?? 0;
+  const rH = renderMeta.height ?? 0;
 
-  const exportCrop = async (aspect, kindJpg, kindPng, suffix) => {
+  const cropRects = {};
+  const exportCrop = async (ratio, kindJpg, suffix) => {
+    const rect = aspectTrim(faceData, rW, rH, ratio);
+    cropRects[suffix] = rect;
     const jpgPath = path.join(processedDir, `${baseName}-${slug}-${suffix}.jpg`);
-    const pipeline = await local.cropToAspect(renderBuf, faceData, aspect, { sharpening });
-    await pipeline.jpeg({ quality: jpegQuality, mozjpeg: true }).toFile(jpgPath);
+    await sharp(renderBuf).extract(rect)
+      .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+      .toFile(jpgPath);
     outputs.push({ path: jpgPath, kind: kindJpg, backdrop: slug });
-    return jpgPath;
   };
 
-  if (opts.portrait) await exportCrop(4 / 5, '4x5', null, '4x5');
-  if (opts.square) await exportCrop(1, 'sqr', null, 'SQR');
+  if (opts.portrait) await exportCrop(4 / 5, '4x5', '4x5');
+  if (opts.square) await exportCrop(1, 'sqr', 'SQR');
 
   /* ---- transparent cut-outs of the render ---- */
   if (opts.cutout) {
@@ -224,13 +261,13 @@ async function processRender(item, deps, frameCache) {
       // Crop the transparent PNG to the same regions as the JPEG outputs.
       if (opts.portrait) {
         const p = path.join(processedDir, `${baseName}-${slug}-4x5-TP.png`);
-        const c = local.computeCrop(faceData, 4 / 5);
+        const c = cropRects['4x5'] ?? aspectTrim(faceData, rW, rH, 4 / 5);
         await sharp(cutoutPng).extract(c).png().toFile(p);
         outputs.push({ path: p, kind: '4x5-tp', backdrop: slug });
       }
       if (opts.square) {
         const p = path.join(processedDir, `${baseName}-${slug}-SQR-TP.png`);
-        const c = local.computeCrop(faceData, 1);
+        const c = cropRects['SQR'] ?? aspectTrim(faceData, rW, rH, 1);
         await sharp(cutoutPng).extract(c).png().toFile(p);
         outputs.push({ path: p, kind: 'sqr-tp', backdrop: slug });
       }

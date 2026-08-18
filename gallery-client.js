@@ -562,10 +562,26 @@ class TurboIQGalleryClient {
   }
 
   /**
+   * Delete a gallery photo by its exact filename (indexed lookup). Used to
+   * REPLACE a re-rendered deliverable — the gallery's duplicate-filename guard
+   * otherwise 409s every re-upload.
+   */
+  async replaceExistingPhoto(galleryId, filename) {
+    const found = await this.request(`/galleries/${galleryId}/photo-by-filename?filename=${encodeURIComponent(filename)}`);
+    if (!found.success || !found.data?.id) return false;
+    const del = await this.request(`/photos/${found.data.id}`, { method: 'DELETE' });
+    return !!del.success;
+  }
+
+  /**
    * uploadPhoto with coarse progress callbacks + retry. onProgress(pct 0-100).
+   * A duplicate-filename rejection deletes the existing photo and retries —
+   * a re-render REPLACES the previous version in the gallery.
    */
   async uploadPhotoWithProgress(galleryId, filePath, onProgress, retries = 2) {
+    const path = require('path');
     let lastError = 'upload failed';
+    let replacedOnce = false;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         if (onProgress) onProgress(attempt === 0 ? 5 : 10);
@@ -575,6 +591,11 @@ class TurboIQGalleryClient {
           return result;
         }
         lastError = result.error || lastError;
+        if (!replacedOnce && /already exists/i.test(lastError)) {
+          replacedOnce = true;
+          const replaced = await this.replaceExistingPhoto(galleryId, path.basename(filePath));
+          if (replaced) continue; // immediate retry, doesn't consume backoff
+        }
       } catch (e) {
         lastError = e.message;
       }

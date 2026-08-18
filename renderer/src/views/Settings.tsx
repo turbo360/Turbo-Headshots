@@ -76,7 +76,7 @@ export default function Settings() {
 
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div className="kicker">Fine-tune (export & local path)</div>
+              <div className="kicker">Fine-tune · local pipeline only (engine renders ship untouched, matching Turbo Enhance)</div>
               <Slider label="Brightness" value={ai.brightness} min={0.9} max={1.3} step={0.01}
                 fmt={(v) => `${v > 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`} onChange={(v) => patchAi({ brightness: v })} />
               <Slider label="White balance" value={ai.whiteBalanceStrength} min={0} max={1} step={0.05}

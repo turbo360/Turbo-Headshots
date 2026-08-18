@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore, activeShoot } from '../state/store';
 import { Badge, Button } from '../components/ds';
 import { mediaUrl } from '../media';
@@ -15,6 +15,7 @@ export default function Review() {
 
   const approvedCount = person ? person.frames.filter((f) => f.approved).length : 0;
   const [est, setEst] = useState<{ perFrame: number; total: number }>({ perFrame: 0, total: 0 });
+  const [zoom, setZoom] = useState<{ src: string; label: string } | null>(null);
 
   // The person may belong to a non-active (dashboard) shoot — always price
   // and dispatch with THEIR shoot's saved defaults.
@@ -90,9 +91,9 @@ export default function Review() {
           const src = f.jpegFile ?? (/(jpe?g)$/i.test(f.file) ? f.file : null);
           return (
             <div className="card" key={f.baseName} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div className="thumb">
+              <div className="thumb zoomable" onClick={() => src && setZoom({ src, label: f.baseName })}>
                 {src ? (
-                  <img src={mediaUrl(src, 480)} alt={f.baseName} loading="lazy" />
+                  <img src={mediaUrl(src, 960)} alt={f.baseName} loading="lazy" />
                 ) : (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#55555C', fontSize: 12, textAlign: 'center', padding: 12 }}>
                     RAW only — no preview.{'\n'}Enable RAW+JPEG on the camera.
@@ -120,6 +121,12 @@ export default function Review() {
           );
         })}
       </div>
+      {zoom && (
+        <div className="lightbox" onClick={() => setZoom(null)}>
+          <img src={mediaUrl(zoom.src, 2400)} alt={zoom.label} />
+          <span className="lb-caption">{zoom.label} · click anywhere to close</span>
+        </div>
+      )}
     </div>
   );
 }

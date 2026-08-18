@@ -91,7 +91,7 @@ class Checkin {
     const person = this.d.shoots.createPerson({
       shootId: shoot.id,
       firstName: firstName || entry.name,
-      lastName: rest.join(' ') || '—',
+      lastName: rest.join(' '),
       email: entry.email || '',
       mobile: entry.mobile || '',
       company: '',

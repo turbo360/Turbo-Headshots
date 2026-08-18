@@ -7,6 +7,7 @@ export default function CheckIn() {
   const shoot = activeShoot(s);
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '', company: '' });
   const [busy, setBusy] = useState(false);
+  const [queueSearch, setQueueSearch] = useState('');
 
   const canStart = !!shoot && form.firstName.trim() && form.lastName.trim() && !busy;
 
@@ -124,14 +125,31 @@ export default function CheckIn() {
           )}
 
           <hr style={{ border: 'none', borderTop: '1px solid #222226', margin: '18px 0 12px' }} />
-          <div className="kicker" style={{ marginBottom: 10 }}>
-            Checked in · waiting ({s.checkin.entries.length})
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <span className="kicker" style={{ flex: 1 }}>
+              Checked in · waiting ({s.checkin.entries.length})
+            </span>
+            {s.checkin.entries.length > 3 && (
+              <input
+                value={queueSearch}
+                onChange={(e) => setQueueSearch(e.target.value)}
+                placeholder="Search name…"
+                style={{
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid #33333a',
+                  borderRadius: 8, padding: '7px 12px', fontSize: 13.5,
+                  color: 'var(--smoke)', width: 170, fontFamily: 'var(--font-body)',
+                }}
+              />
+            )}
           </div>
           <div className="row-list">
             {s.checkin.entries.length === 0 && (
               <div style={{ fontSize: 13, color: '#55555C' }}>No one waiting.</div>
             )}
-            {s.checkin.entries.map((e) => (
+            {s.checkin.entries.filter((e) => {
+              const q = queueSearch.trim().toLowerCase();
+              return !q || e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q);
+            }).map((e) => (
               <div key={e.id} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 background: 'rgba(255,255,255,0.04)', border: '1px solid #222226',

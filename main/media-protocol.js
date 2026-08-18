@@ -64,7 +64,7 @@ function registerMediaProtocol(app, allowedRoots) {
         await sharp(resolved)
           .rotate()
           .resize(w, w * 2, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 82 })
+          .jpeg({ quality: 90 })
           .toFile(thumbPath);
       }
       return new Response(fs.readFileSync(thumbPath), { headers: { 'Content-Type': 'image/jpeg' } });
