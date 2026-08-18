@@ -1,0 +1,31 @@
+/* ============================================================
+   CHARTS — data-viz tokens — Turbo 360
+   Carbon grid, mono axes, red-led series. Keep charts flat:
+   hairline grid, no 3D, no drop shadows, square legend chips.
+   ============================================================ */
+
+:root {
+  /* ---------- Series order (use in sequence) ---------- */
+  --chart-1: #BF212F;   /* Turbo Red — the lead series */
+  --chart-2: #141414;   /* Carbon */
+  --chart-3: #F2A900;   /* Ignition Amber */
+  --chart-4: #0FA3A3;   /* Cinema Teal */
+  --chart-5: #8A8884;   /* Ash — comparisons / prior period */
+  --chart-6: #8E1822;   /* Redline — depth split of series 1 */
+
+  /* ---------- Soft fills (area charts, bars on hover) ---------- */
+  --chart-1-soft: rgba(191,33,47,.12);
+  --chart-3-soft: rgba(242,169,0,.14);
+  --chart-4-soft: rgba(15,163,163,.12);
+
+  /* ---------- Scaffolding ---------- */
+  --chart-grid:       #E4E4E9;  /* hairline gridlines (cockpit) */
+  --chart-grid-paper: #E2DED6;  /* gridlines on Smoke */
+  --chart-axis:       #9A9AA0;  /* axis + tick labels — Space Mono, 10px, 0.1em tracking */
+  --chart-baseline:   #141414;  /* zero / x baseline, 1.5px */
+
+  /* ---------- Dark surfaces (carbon hero tiles, decks) ---------- */
+  --chart-grid-dark:  #2B2B2B;
+  --chart-axis-dark:  #7A7A82;
+  --chart-2-dark:     #F4F2EE;  /* Carbon series swaps to Smoke on dark */
+}

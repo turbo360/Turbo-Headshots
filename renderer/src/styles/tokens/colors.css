@@ -1,0 +1,80 @@
+/* ============================================================
+   COLORS — Turbo 360
+   The brand-guide palette is the source of truth.
+   The Admin "operations cockpit" theme is a product layer on
+   top of it (see the --admin-* / --status-* aliases below).
+   ============================================================ */
+
+:root {
+  /* ---------- Core brand ---------- */
+  --turbo-red:        #BF212F;   /* signature accent — used with intent */
+  --carbon:           #141414;   /* primary text & dark surfaces */
+  --smoke:            #F4F2EE;   /* light backgrounds & paper */
+
+  /* ---------- Cinematic accents ---------- */
+  --redline:          #8E1822;   /* depth & shadow red */
+  --ignition-amber:   #F2A900;   /* highlight & energy */
+  --cinema-teal:      #0FA3A3;   /* cool counterpoint */
+
+  /* ---------- Neutral scale (warm grey) ---------- */
+  --neutral-900:      #141414;   /* Carbon   */
+  --neutral-800:      #2B2B2B;   /* Graphite */
+  --neutral-600:      #555350;   /* Slate    */
+  --neutral-500:      #8A8884;   /* Ash      */
+  --neutral-400:      #B9B6AF;   /* Silver   */
+  --neutral-300:      #DEDAD2;   /* Fog      */
+  --neutral-200:      #E2DED6;   /* hairline border on paper */
+  --neutral-150:      #EFEDE7;   /* alt section background */
+  --neutral-100:      #F4F2EE;   /* Smoke    */
+  --white:            #FFFFFF;
+
+  /* ---------- Semantic aliases (brand surfaces) ---------- */
+  --color-bg:             var(--smoke);
+  --color-bg-alt:         var(--neutral-150);
+  --color-bg-inverse:     var(--carbon);
+  --color-surface:        var(--white);
+  --color-border:         var(--neutral-200);
+  --color-border-strong:  var(--carbon);
+
+  --color-text:           var(--carbon);
+  --color-text-secondary: var(--neutral-600);
+  --color-text-muted:     var(--neutral-500);
+  --color-text-inverse:   var(--smoke);
+
+  --color-accent:         var(--turbo-red);
+  --color-accent-hover:   var(--redline);
+  --color-on-accent:      var(--white);
+
+  /* ---------- Admin product theme ---------- */
+  --admin-page:       #EDEDF0;   /* cockpit canvas (cooler than Smoke) */
+  --admin-carbon:     #0A0A0B;   /* near-black sidebar / hero tiles */
+  --admin-surface:    #FFFFFF;   /* cards */
+  --admin-surface-2:  #FBFBFC;   /* table head, inset fields */
+  --admin-border:     #E4E4E9;   /* cool hairline */
+  --admin-border-2:   #F2F2F5;   /* row divider */
+  --admin-muted:      #9A9AA0;   /* secondary text */
+  --admin-ink:        #0A0A0B;
+  --admin-ink-2:      #55555C;
+
+  /* ---------- Functional / status ---------- */
+  --status-success:   #16A34A;   /* paid / won */
+  --status-warning:   #F2A900;   /* money / due */
+  --status-info:      #0FA3A3;   /* info / viewed */
+  --status-danger:    #DC2626;   /* overdue */
+  --status-scheduled: #4338CA;   /* scheduled / follow-up */
+  --status-neutral:   #9A9AA0;   /* draft / muted */
+
+  /* status pill fills (soft bg + ink) */
+  --pill-success-bg:  #DCFCE7;  --pill-success-fg:  #15803D;
+  --pill-info-bg:     #DBEAFE;  --pill-info-fg:     #1D4ED8;
+  --pill-viewed-bg:   #CFFAFE;  --pill-viewed-fg:   #0E7490;
+  --pill-warning-bg:  #FEF3C7;  --pill-warning-fg:  #92400E;
+  --pill-scheduled-bg:#EEF2FF;  --pill-scheduled-fg:#4338CA;
+  --pill-danger-bg:   #FEE2E2;  --pill-danger-fg:   #991B1B;
+  --pill-neutral-bg:  #EDEDF0;  --pill-neutral-fg:  #55555C;
+  --pill-cancel-bg:   #F1F5F9;  --pill-cancel-fg:   #64748B;
+
+  /* ---------- Signature gradients ---------- */
+  --signal-bar: linear-gradient(90deg,#BF212F 0 33%,#F2A900 33% 66%,#0FA3A3 66% 100%); /* @kind color */
+  --grade-cinematic: linear-gradient(120deg,#0a2a2c 0%,#103e3e 38%,#1d1206 72%,#3a2400 100%); /* @kind color */
+}

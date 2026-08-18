@@ -1,0 +1,26 @@
+/* ============================================================
+   SPACING — Turbo 360
+   8px base rhythm; larger steps for editorial section padding.
+   ============================================================ */
+
+:root {
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+  --space-18:  72px;   /* editorial gutter (brand-guide section x-padding) */
+  --space-24:  96px;
+  --space-30:  120px;  /* section y-padding */
+
+  /* common layout dims */
+  --rail-width:     264px;   /* brand-guide fixed nav rail */
+  --sidebar-width:  248px;   /* admin sidebar */
+  --content-max:    1080px;  /* admin content column */
+  --reading-max:    680px;   /* prose measure */
+}

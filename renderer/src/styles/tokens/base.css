@@ -1,0 +1,16 @@
+/* ============================================================
+   BASE — minimal resets shared by consumers — Turbo 360
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--turbo-red); color: #fff; }

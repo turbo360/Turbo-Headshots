@@ -6,7 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
-const smartcrop = require('smartcrop-sharp');
+let smartcrop = null;
+try { smartcrop = require('smartcrop-sharp'); } catch { /* removed in v2; sidecar is primary */ }
 const ReplicateClient = require('./replicate');
 const SidecarClient = require('./sidecar-client');
 
@@ -788,6 +789,7 @@ class HeadshotProcessor {
    * fails or no face is detected (e.g. occluded, extreme angle).
    */
   async _detectFaceAndCropFallback(imagePath) {
+    if (!smartcrop) throw new Error('smartcrop-sharp not installed and Vision sidecar unavailable');
     const metadata = await sharp(imagePath).metadata();
     const needsRotation = metadata.orientation && metadata.orientation > 1;
     let width, height, tempPath = null;

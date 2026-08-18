@@ -450,6 +450,126 @@ class TurboIQGalleryClient {
       this.username = state.username || null;
     }
   }
+
+  /* ========== Shoots + QR check-in (Turbo Headshots v2) ==========
+     Server side: /api/shoots + /api/checkin-entries + /api/public/checkin
+     (turbo-iq backend). All shapes per the v2 check-in design. */
+
+  /**
+   * Create a shoot server-side (anchors the check-in slug + links the gallery).
+   * If galleryId is omitted, creates (or reuses by name) a gallery first.
+   */
+  async createShoot({ name, client = null, shootDate = null, location = null, galleryId = null, galleryName = null }) {
+    try {
+      let gid = galleryId;
+      if (!gid) {
+        const gname = galleryName || name;
+        const created = await this.createGallery(gname, shootDate || undefined);
+        if (created.success) {
+          gid = created.gallery.id;
+        } else if (/already exists/i.test(created.error || '')) {
+          const list = await this.listGalleries();
+          const match = list.success && list.galleries.find((g) => g.name === gname);
+          if (match) gid = match.id;
+        }
+        if (!gid) return { success: false, error: created.error || 'Could not create gallery' };
+      }
+      const result = await this.request('/shoots', {
+        method: 'POST',
+        body: { name, client, shoot_date: shootDate, location, gallery_id: gid },
+      });
+      if (!result.success) return { success: false, error: result.error };
+      return {
+        success: true,
+        shoot: result.data,
+        checkinUrl: result.data.checkin_url,
+        galleryId: gid,
+        galleryShareUrl: result.data.gallery?.share_url ?? null,
+      };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  async listShoots(status = 'active') {
+    try {
+      const result = await this.request(`/shoots?status=${encodeURIComponent(status)}`);
+      return result.success
+        ? { success: true, shoots: result.data }
+        : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async getShoot(shootId) {
+    try {
+      const result = await this.request(`/shoots/${shootId}`);
+      return result.success ? { success: true, shoot: result.data } : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async updateShoot(shootId, updates) {
+    try {
+      const result = await this.request(`/shoots/${shootId}`, { method: 'PUT', body: updates });
+      return result.success ? { success: true, shoot: result.data } : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async getCheckinQueue(shootId) {
+    try {
+      const result = await this.request(`/shoots/${shootId}/checkin-entries?status=waiting`);
+      return result.success
+        ? { success: true, entries: result.data.entries, waitingCount: result.data.waiting_count, serverTime: result.data.server_time }
+        : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async useCheckinEntry(entryId, shootNumber = null) {
+    try {
+      const result = await this.request(`/checkin-entries/${entryId}/use`, {
+        method: 'POST',
+        body: shootNumber ? { shoot_number: shootNumber } : {},
+      });
+      return result.success
+        ? { success: true, entry: result.data }
+        : { success: false, error: result.error, statusCode: result.statusCode };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async cancelCheckinEntry(entryId) {
+    try {
+      const result = await this.request(`/checkin-entries/${entryId}/cancel`, { method: 'POST', body: {} });
+      return result.success ? { success: true, entry: result.data } : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async requeueCheckinEntry(entryId) {
+    try {
+      const result = await this.request(`/checkin-entries/${entryId}/requeue`, { method: 'POST', body: {} });
+      return result.success ? { success: true, entry: result.data } : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  /**
+   * uploadPhoto with coarse progress callbacks + retry. onProgress(pct 0-100).
+   */
+  async uploadPhotoWithProgress(galleryId, filePath, onProgress, retries = 2) {
+    let lastError = 'upload failed';
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        if (onProgress) onProgress(attempt === 0 ? 5 : 10);
+        const result = await this.uploadPhoto(galleryId, filePath);
+        if (result.success) {
+          if (onProgress) onProgress(100);
+          return result;
+        }
+        lastError = result.error || lastError;
+      } catch (e) {
+        lastError = e.message;
+      }
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+    return { success: false, error: lastError };
+  }
 }
 
 module.exports = TurboIQGalleryClient;

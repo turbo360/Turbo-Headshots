@@ -1,0 +1,45 @@
+/* Self-hosted fonts (OFL) — no network dependency for first paint.
+   Archivo VF carries wght 100-900 and wdth 62%-125%; "Archivo Expanded"
+   is font-stretch: 125% on the same file. */
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('../assets/fonts/Archivo-100_900.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Archivo Expanded';
+  src: url('../assets/fonts/Archivo-100_900.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 125%;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Hanken Grotesk';
+  src: url('../assets/fonts/HankenGrotesk-100_900.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('../assets/fonts/SpaceMono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('../assets/fonts/SpaceMono-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}

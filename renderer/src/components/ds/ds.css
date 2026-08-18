@@ -1,0 +1,101 @@
+/* Turbo 360 DS components — re-implemented from the design-system bundle specs. */
+
+.ds-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--font-heading); font-weight: 600; line-height: 1;
+  border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-turbo),
+              border-color var(--dur-fast) var(--ease-turbo),
+              color var(--dur-fast) var(--ease-turbo);
+}
+.ds-btn:active { transform: translateY(1px); }
+.ds-btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+.ds-btn:focus-visible { outline: 2px solid var(--turbo-red); outline-offset: 2px; }
+
+.ds-btn.sm { padding: 8px 13px; font-size: 12.5px; border-radius: var(--radius-md); }
+.ds-btn.md { padding: 11px 18px; font-size: 13.5px; border-radius: var(--radius-lg); }
+.ds-btn.lg { padding: 14px 24px; font-size: 15px; border-radius: var(--radius-lg); }
+
+.ds-btn.primary { background: var(--turbo-red); color: #fff; }
+.ds-btn.primary:hover { background: var(--redline); }
+.ds-btn.dark { background: var(--admin-carbon); color: var(--smoke); }
+.ds-btn.dark:hover { background: #222226; }
+.ds-btn.secondary { background: var(--admin-surface); color: var(--admin-ink); border-color: var(--admin-border); }
+.ds-btn.secondary:hover { border-color: var(--admin-muted); }
+.ds-btn.ghost { background: transparent; color: var(--turbo-red); }
+.ds-btn.ghost:hover { background: rgba(191, 33, 47, 0.06); }
+/* ghost on carbon surfaces */
+.card.carbon .ds-btn.ghost, .sheet.carbon .ds-btn.ghost { color: var(--smoke); }
+.card.carbon .ds-btn.ghost:hover, .sheet.carbon .ds-btn.ghost:hover { background: rgba(255,255,255,0.08); }
+.card.carbon .ds-btn.secondary, .sheet.carbon .ds-btn.secondary {
+  background: transparent; color: var(--smoke); border-color: #33333a;
+}
+
+.ds-badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+  border-radius: 6px; padding: 5px 10px;
+}
+.ds-badge.success  { background: var(--pill-success-bg, #DCFCE7);  color: var(--pill-success-fg, #15803D); }
+.ds-badge.info     { background: var(--pill-info-bg, #DBEAFE);     color: var(--pill-info-fg, #1D4ED8); }
+.ds-badge.viewed   { background: var(--pill-viewed-bg, #CFFAFE);   color: var(--pill-viewed-fg, #0E7490); }
+.ds-badge.warning  { background: var(--pill-warning-bg, #FEF3C7);  color: var(--pill-warning-fg, #92400E); }
+.ds-badge.danger   { background: var(--pill-danger-bg, #FEE2E2);   color: var(--pill-danger-fg, #991B1B); }
+.ds-badge.neutral  { background: var(--pill-neutral-bg, #EDEDF0);  color: var(--pill-neutral-fg, #55555C); }
+
+.ds-stat {
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius-2xl);
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ds-stat.hero { background: var(--admin-carbon); border-color: var(--admin-carbon); color: #fff; }
+.ds-stat .label {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--admin-muted);
+}
+.ds-stat.hero .label { color: #B9B6AF; }
+.ds-stat .value {
+  font-family: var(--font-mono); font-weight: 700; font-size: 28px;
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+}
+.ds-stat .sub { font-size: 13px; color: var(--admin-muted); }
+
+.ds-switch {
+  position: relative; width: 38px; height: 22px; flex: none;
+  border-radius: 20px; border: none; cursor: pointer;
+  background: var(--admin-border);
+  transition: background var(--dur-base) var(--ease-turbo);
+}
+.ds-switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  transition: left var(--dur-base) var(--ease-turbo);
+}
+.ds-switch.on { background: var(--status-success); }
+.ds-switch.on::after { left: 19px; }
+.ds-switch:focus-visible { outline: 2px solid var(--turbo-red); outline-offset: 2px; }
+
+.ds-field { display: flex; flex-direction: column; gap: 7px; }
+.ds-field > .lbl { font-size: 12.5px; font-weight: 600; color: var(--admin-ink-2); }
+.ds-field input, .ds-field select {
+  font-family: var(--font-body); font-size: 15px; color: var(--admin-ink);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border); border-radius: var(--radius-lg);
+  padding: 11px 13px; width: 100%;
+}
+.ds-field input:focus, .ds-field select:focus { outline: none; border-color: var(--admin-ink-2); }
+.ds-field.error input { border-color: var(--status-danger); }
+.ds-field .hint { font-size: 12px; color: var(--admin-muted); }
+.ds-field .err { font-size: 12px; color: var(--status-danger); }
+
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 0;
+}
+.switch-row + .switch-row { border-top: 1px solid var(--admin-border-2); }
+.switch-row .t { font-size: 15px; font-weight: 500; }
+.switch-row .d { font-size: 13px; color: var(--admin-muted); margin-top: 2px; }
