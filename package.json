@@ -71,7 +71,8 @@
       "notarize": {
         "teamId": "ETURVK9WSA"
       },
-      "x64ArchFiles": "Contents/Resources/HeadshotSidecar"
+      "x64ArchFiles": "Contents/Resources/HeadshotSidecar",
+      "icon": "build/icon.icns"
     },
     "extraResources": [
       {
@@ -93,7 +94,8 @@
           "type": "link",
           "path": "/Applications"
         }
-      ]
+      ],
+      "icon": "build/dmg-icon.icns"
     },
     "files": [
       "main.js",

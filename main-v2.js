@@ -58,6 +58,9 @@ function launchLumixTether() {
 }
 
 app.whenReady().then(() => {
+  if (!app.isPackaged && process.platform === 'darwin') {
+    try { app.dock.setIcon(path.join(__dirname, 'build', 'icon-dev.png')); } catch { /* dev nicety only */ }
+  }
   const settings = new Settings(app);
   const usage = new Usage(app);
   const shoots = new ShootsStore(app, settings);
