@@ -4,3 +4,7 @@ dist/
 *.log
 sidecar/.build/
 resources/
+
+# electron-builder buildResources (app icons) — NOT a build output
+!build/
+!build/**
