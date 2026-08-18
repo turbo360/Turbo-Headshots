@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 
 const { registerSchemes, registerMediaProtocol } = require('./main/media-protocol');
+const { flushAll } = require('./main/store');
 const { Settings } = require('./main/settings');
 const { ShootsStore } = require('./main/shoots');
 const { Session } = require('./main/session');
@@ -24,6 +25,22 @@ process.stdout?.on?.('error', (err) => { if (err.code !== 'EPIPE') throw err; })
 process.stderr?.on?.('error', (err) => { if (err.code !== 'EPIPE') throw err; });
 
 registerSchemes(); // must run before app ready
+
+// Shoot-day incidents must be diagnosable after the fact: mirror engine logs
+// and crashes to userData/logs/main.log (packaged apps have no visible stdout).
+let logStream = null;
+function fileLog(line) {
+  try { logStream?.write(`${new Date().toISOString()} ${line}\n`); } catch { /* never throw from logging */ }
+}
+process.on('uncaughtException', (err) => {
+  console.error('[uncaught]', err);
+  fileLog(`UNCAUGHT ${err.stack || err.message}`);
+  flushAll();
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+  fileLog(`UNHANDLED_REJECTION ${reason instanceof Error ? reason.stack : String(reason)}`);
+});
 
 let mainWindow = null;
 let sidecar = null;
@@ -58,6 +75,12 @@ function launchLumixTether() {
 }
 
 app.whenReady().then(() => {
+  try {
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logStream = fs.createWriteStream(path.join(logDir, 'main.log'), { flags: 'a' });
+    fileLog(`--- boot v${app.getVersion()} ---`);
+  } catch { /* logging is best-effort */ }
   if (!app.isPackaged && process.platform === 'darwin') {
     try { app.dock.setIcon(path.join(__dirname, 'build', 'icon-dev.png')); } catch { /* dev nicety only */ }
   }
@@ -65,17 +88,17 @@ app.whenReady().then(() => {
   const usage = new Usage(app);
   const shoots = new ShootsStore(app, settings);
   const replicate = new ReplicateClient(() => settings.raw.replicateApiKey);
-  const gallery = new Gallery({ settings, shoots, push });
+  const gallery = new Gallery({ app, settings, shoots, push });
   const session = new Session(settings, shoots, push);
-  const checkin = new Checkin({ settings, shoots, gallery: () => gallery.client, push });
+  const checkin = new Checkin({ settings, shoots, gallery, push });
 
-  const engine = new Engine({
+  const engine = globalThis.__engine = new Engine({
     app, settings, shoots,
     client: replicate,
     sidecar: getSidecar,
     usage,
     push,
-    log: (message, type = 'info') => push('processing-log', { message, type }),
+    log: (message, type = 'info') => { fileLog(`[${type}] ${message}`); push('processing-log', { message, type }); },
     onOutputs: (batch, person, item) => gallery.uploadItemOutputs(batch, item),
   });
 
@@ -130,7 +153,7 @@ app.whenReady().then(() => {
   ]);
 
   /* ---------- updater ---------- */
-  autoUpdater.autoDownload = false;
+  autoUpdater.autoDownload = true; // renderer banner triggers on 'downloaded'
   autoUpdater.on('update-available', (info) => push('update-status', { status: 'available', version: info.version }));
   autoUpdater.on('update-downloaded', (info) => push('update-status', { status: 'downloaded', version: info.version }));
   autoUpdater.on('error', (err) => console.log('[updater]', err.message));
@@ -170,10 +193,11 @@ app.whenReady().then(() => {
   mainWindow.on('blur', () => checkin.setBlurred(true));
 
   /* ---------- boot ---------- */
-  shoots.importLegacyFolders();
-  watcher.start();
-  checkin.start();
-  engine.pump(); // resume any recovered pending items
+  const boot = (label, fn) => { try { fn(); } catch (err) { console.error(`[boot] ${label}:`, err.message); fileLog(`BOOT ${label} failed: ${err.message}`); } };
+  boot('importLegacyFolders', () => shoots.importLegacyFolders());
+  boot('watcher', () => watcher.start());
+  boot('checkin', () => checkin.start());
+  boot('engine.pump', () => engine.pump()); // resume any recovered pending items
   setTimeout(() => { launchLumixTether(); }, 1000);
   setTimeout(() => { updater.check(); }, 3000);
 });
@@ -183,6 +207,25 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-app.on('before-quit', () => {
+let quitConfirmed = false;
+app.on('before-quit', (event) => {
+  const busy = globalThis.__engine && (globalThis.__engine.running > 0 ||
+    globalThis.__engine.queue.data.some((i) => i.status === 'pending'));
+  if (busy && !quitConfirmed && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    const { dialog } = require('electron');
+    void dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Cancel', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Renders are still running',
+      detail: 'Pending renders will resume on next launch, but in-flight Replicate calls are abandoned (and still billed).',
+    }).then(({ response }) => {
+      if (response === 1) { quitConfirmed = true; app.quit(); }
+    });
+    return;
+  }
+  flushAll();
   if (sidecar) { sidecar.stop(); sidecar = null; }
 });

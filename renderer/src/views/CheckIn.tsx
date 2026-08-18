@@ -29,8 +29,11 @@ export default function CheckIn() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const st = useStore.getState();
       if (e.key === 'Enter' && !s.session.active && canStart
-          && !(e.target instanceof HTMLTextAreaElement)) {
+          && !(el && (el.tagName === 'BUTTON' || el.tagName === 'TEXTAREA'))
+          && !st.qrOpen && !st.newShootOpen && !st.dispatchTarget) {
         e.preventDefault();
         void start();
       }

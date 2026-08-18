@@ -8,7 +8,16 @@ export async function initIpc(): Promise<void> {
   const t = window.turbo;
   const st = useStore.getState();
 
-  t.on('session:state', (p) => useStore.setState({ session: p as SessionState }));
+  t.on('session:state', (p) => {
+    const next = p as SessionState;
+    useStore.setState((s) => ({
+      session: next,
+      // New subject (or fresh session): never show the previous person's frames.
+      ...(next.personId !== s.session.personId
+        ? { sessionFrames: [], lastFrame: null }
+        : {}),
+    }));
+  });
 
   t.on('session:frame-added', (p) => {
     const { previewUrl, baseName } = p as { previewUrl: string; baseName: string };
@@ -62,15 +71,22 @@ export async function initIpc(): Promise<void> {
 
   t.on('update-status', (p) => useStore.setState({ updateInfo: p as { status: string; version?: string } }));
 
+  t.on('gallery-upload-result', (p) => {
+    const r = p as { success: boolean; filename: string; error?: string | null };
+    if (!r.success) {
+      useStore.getState().showToast(`Upload failed: ${r.filename}${r.error ? ` — ${r.error}` : ''}`, 'error');
+    }
+  });
+
   // Initial load
-  const [version, appSettings, aiSettings, shoots, gallerySettings, session, batches, processing, checkin] =
+  const [version, appSettings, aiSettings, shoots, gallerySettings, session, batches, processing, checkin, transfers] =
     await Promise.all([
       t.app.getVersion(), t.settings.get(), t.settings.getAi(), t.shoots.list(),
       t.gallery.getSettings(), t.session.current(), t.batches.list(),
-      t.processing.getStatus(), t.checkin.getState(),
+      t.processing.getStatus(), t.checkin.getState(), t.gallery.listTransfers(),
     ]);
   useStore.setState({
-    version, appSettings, aiSettings, shoots, gallerySettings, session, batches, processing, checkin,
+    version, appSettings, aiSettings, shoots, gallerySettings, session, batches, processing, checkin, transfers,
     dispatchOpts: aiSettings?.defaultDispatchOpts ?? st.dispatchOpts,
   });
   await refreshActivePeople();

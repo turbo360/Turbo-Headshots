@@ -16,7 +16,10 @@ export default function Review() {
   const approvedCount = person ? person.frames.filter((f) => f.approved).length : 0;
   const [est, setEst] = useState<{ perFrame: number; total: number }>({ perFrame: 0, total: 0 });
 
-  const opts = person && shoot ? shoot.defaults : s.dispatchOpts;
+  // The person may belong to a non-active (dashboard) shoot — always price
+  // and dispatch with THEIR shoot's saved defaults.
+  const personShoot = person ? s.shoots.find((x) => x.id === person.shootId) ?? shoot : shoot;
+  const opts = personShoot ? personShoot.defaults : s.dispatchOpts;
 
   useEffect(() => {
     let live = true;
@@ -84,11 +87,17 @@ export default function Review() {
 
       <div className="grid grid-frames">
         {person.frames.map((f) => {
-          const src = f.jpegFile ?? f.file;
+          const src = f.jpegFile ?? (/(jpe?g)$/i.test(f.file) ? f.file : null);
           return (
             <div className="card" key={f.baseName} style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div className="thumb">
-                <img src={mediaUrl(src, 480)} alt={f.baseName} loading="lazy" />
+                {src ? (
+                  <img src={mediaUrl(src, 480)} alt={f.baseName} loading="lazy" />
+                ) : (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#55555C', fontSize: 12, textAlign: 'center', padding: 12 }}>
+                    RAW only — no preview.{'\n'}Enable RAW+JPEG on the camera.
+                  </div>
+                )}
                 {f.quality && (
                   <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 6 }}>
                     {!f.quality.eyesOpen && <Badge tone="warning">Eyes?</Badge>}

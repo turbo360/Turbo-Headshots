@@ -3,14 +3,24 @@
 const path = require('path');
 const crypto = require('crypto');
 const TurboIQGalleryClient = require('../gallery-client');
+const { JsonStore } = require('./store');
 
 class Gallery {
-  /** @param {object} deps { settings, shoots, push } */
+  /** @param {object} deps { app, settings, shoots, push } */
   constructor(deps) {
     this.d = deps;
     this.client = null;
-    this.transfers = []; // { id, filename, filePath, galleryId, pct, status }
+    // Persisted: failed uploads must survive a restart or they're silently
+    // undelivered client photos.
+    this.transferStore = new JsonStore(
+      path.join(deps.app.getPath('userData'), 'store', 'transfers.json'), []);
+    // In-flight at crash → mark failed so Retry works after relaunch.
+    this.transferStore.update((list) => {
+      for (const t of list) if (t.status === 'uploading') t.status = 'failed';
+    });
   }
+
+  get transfers() { return this.transferStore.data; }
 
   getClient() {
     if (!this.client) this.client = new TurboIQGalleryClient();
@@ -56,8 +66,13 @@ class Gallery {
     const r = this.d.settings.raw;
     if (!r.galleryAutoUpload) return;
     const shoot = this.d.shoots.getShoot(batch.shootId);
-    const galleryId = shoot?.galleryId ?? r.lastGalleryId;
-    if (!galleryId) return;
+    // Deliberately NO fallback to lastGalleryId: a shoot without its own
+    // gallery must never leak photos into a previous client's gallery.
+    const galleryId = shoot?.galleryId;
+    if (!galleryId) {
+      this.d.push('processing-log', { message: `Upload skipped for ${path.basename(item.outputs?.[0]?.path ?? '')}: shoot has no linked gallery`, type: 'warning' });
+      return;
+    }
     const client = await this.ensureAuthed();
     if (!client) return;
 
@@ -71,15 +86,26 @@ class Gallery {
         pct: 0,
         status: 'uploading',
       };
-      this.transfers.push(transfer);
-      if (this.transfers.length > 200) this.transfers.splice(0, this.transfers.length - 200);
+      this.transferStore.update((list) => {
+        list.push(transfer);
+        // Cap, but never evict entries still marked failed (they're the
+        // undelivered-work ledger).
+        while (list.length > 300) {
+          const idx = list.findIndex((t) => t.status !== 'failed');
+          if (idx < 0) break;
+          list.splice(idx, 1);
+        }
+      });
       this.emit(transfer);
       const res = await client.uploadPhotoWithProgress(galleryId, out.path, (pct) => {
         transfer.pct = pct;
         this.emit(transfer);
       });
+      this.transferStore.update((list) => {
+        const t = list.find((x) => x.id === transfer.id);
+        if (t) { t.status = res.success ? 'done' : 'failed'; t.pct = res.success ? 100 : t.pct; }
+      });
       transfer.status = res.success ? 'done' : 'failed';
-      transfer.pct = res.success ? 100 : transfer.pct;
       this.emit(transfer);
       this.d.push('gallery-upload-result', {
         success: res.success, filename: transfer.filename, error: res.error ?? null,
@@ -92,11 +118,18 @@ class Gallery {
     if (!t || t.status !== 'failed') return;
     const client = await this.ensureAuthed();
     if (!client) return;
-    t.status = 'uploading'; t.pct = 0; this.emit(t);
+    this.transferStore.update((list) => {
+      const x = list.find((y) => y.id === id);
+      if (x) { x.status = 'uploading'; x.pct = 0; }
+    });
+    this.emit(t);
     const res = await client.uploadPhotoWithProgress(t.galleryId, t.filePath, (pct) => {
       t.pct = pct; this.emit(t);
     });
-    t.status = res.success ? 'done' : 'failed';
+    this.transferStore.update((list) => {
+      const x = list.find((y) => y.id === id);
+      if (x) { x.status = res.success ? 'done' : 'failed'; x.pct = res.success ? 100 : x.pct; }
+    });
     this.emit(t);
   }
 

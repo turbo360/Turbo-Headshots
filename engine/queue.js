@@ -41,8 +41,24 @@ class Engine {
       for (const b of list) {
         if (b.status === 'processing' || b.status === 'queued') {
           const items = this.queue.data.filter((i) => i.batchId === b.id);
-          if (items.some((i) => i.status === 'pending')) b.status = 'queued';
+          if (items.some((i) => i.status === 'pending')) {
+            b.status = 'queued';
+          } else if (items.length > 0) {
+            // All items already finished but the batch flush was lost in a
+            // crash — recompute the terminal status so it isn't stuck forever.
+            b.doneCount = items.filter((i) => i.status === 'completed').length;
+            b.failedCount = items.filter((i) => i.status === 'failed').length;
+            b.status = b.failedCount === 0 ? 'done' : (b.doneCount > 0 ? 'partial' : 'failed');
+          }
         }
+      }
+    });
+    // Housekeeping: completed queue items older than 7 days.
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    this.queue.update((items) => {
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].status === 'completed' && items[i].finishedAt &&
+            new Date(items[i].finishedAt).getTime() < cutoff) items.splice(i, 1);
       }
     });
   }
@@ -102,7 +118,8 @@ class Engine {
     });
     this.batches.update((list) => {
       const i = list.findIndex((x) => x.id === id);
-      if (i >= 0 && (list[i].status === 'held' || list[i].status === 'done' || list[i].status === 'failed')) list.splice(i, 1);
+      if (i >= 0 && ['held', 'done', 'failed', 'partial', 'processing'].includes(list[i].status)
+        && !this.queue.data.some((q) => q.batchId === id && q.status === 'processing')) list.splice(i, 1);
     });
     this.notifyBatches();
   }
@@ -110,6 +127,9 @@ class Engine {
   startBatch(id) {
     const batch = this.batches.data.find((b) => b.id === id);
     if (!batch || (batch.status !== 'held' && batch.status !== 'queued')) return;
+    // Idempotent: a queued batch already has its items — starting it again
+    // must never enqueue (and bill) the whole set a second time.
+    if (this.queue.data.some((i) => i.batchId === id)) { this.pump(); return; }
     const engineOn = this.engineAvailable();
     const backdrops = engineOn ? batch.opts.backdrops : [null];
     const items = [];
@@ -222,6 +242,17 @@ class Engine {
   }
 
   async runItem(item, lane) {
+    try {
+      await this._runItemInner(item, lane);
+    } catch (err) {
+      // Deps construction / anything unexpected: never leave an item stuck in
+      // 'processing' with no error surfaced.
+      console.error('[engine] runItem fatal:', err.message);
+      this.finishItem(item, 'failed', err.message);
+    }
+  }
+
+  async _runItemInner(item, lane) {
     const person = item.personId ? this.d.shoots.getPerson(item.personId) : null;
     const frame = person?.frames.find((f) => f.baseName === item.baseName)
       ?? this.findFrameAcrossShoot(item.shootId, item.baseName);
@@ -281,30 +312,22 @@ class Engine {
       const msg = err.message || 'processing failed';
       this.d.log(`Error: ${item.baseName}${item.backdrop ? ` · ${item.backdrop}` : ''} — ${msg}`, 'error');
 
-      if (item.retries < 2) {
-        item.retries++;
+      // Offline: don't burn retries or degrade to local — hold the item,
+      // auto-pause the engine, and auto-resume when connectivity returns.
+      if (item.backdrop !== null && isNetworkClass(msg)) {
         item.status = 'pending';
         this.queue.scheduleSave();
-        setLane('render', `Retry ${item.retries}/2`, 0, `Retry ${item.retries}/2`, 'warning');
-        await new Promise((r) => setTimeout(r, 2000 * item.retries));
+        this.autoPauseOffline();
         return;
       }
 
-      // Retries exhausted on an engine render: network-class failures degrade
-      // to the local pipeline rather than failing the frame outright.
-      if (item.backdrop !== null && isNetworkClass(msg)) {
-        try {
-          const result = await processLocal(workItem, deps, cache);
-          item.outputs = result.outputs;
-          item.flags = [...result.flags];
-          this.applyFrameFlags(owner, item.baseName, item.flags);
-          this.finishItem(item, 'completed', null);
-          this.d.log(`Local fallback delivered: ${item.baseName}`, 'warning');
-          return;
-        } catch (err2) {
-          this.finishItem(item, 'failed', `${msg}; local fallback also failed: ${err2.message}`);
-          return;
-        }
+      if (item.retries < 2) {
+        item.retries++;
+        setLane('render', `Retry ${item.retries}/2`, 0, `Retry ${item.retries}/2`, 'warning');
+        await new Promise((r) => setTimeout(r, 2000 * item.retries));
+        item.status = 'pending'; // only now — nobody else picks it up mid-backoff
+        this.queue.scheduleSave();
+        return;
       }
       this.finishItem(item, 'failed', msg);
     }
@@ -358,8 +381,33 @@ class Engine {
 
   /* ---------- controls ---------- */
 
-  pause() { this.paused = true; this.notifyStatus(); }
-  resume() { this.paused = false; this.pump(); }
+  pause() { this.paused = true; this.pausedReason = 'paused'; this.notifyStatus(); }
+  resume() {
+    this.paused = false;
+    this.pausedReason = null;
+    if (this._onlineProbe) { clearInterval(this._onlineProbe); this._onlineProbe = null; }
+    this.pump();
+  }
+
+  /** Network dropped mid-render: hold the queue and resume when it returns. */
+  autoPauseOffline() {
+    if (this.paused && this.pausedReason === 'offline') return;
+    this.paused = true;
+    this.pausedReason = 'offline';
+    this.d.log('No internet — engine paused; will resume automatically when the connection returns', 'warning');
+    this.notifyStatus();
+    if (this._onlineProbe) clearInterval(this._onlineProbe);
+    this._onlineProbe = setInterval(() => {
+      fetch('https://api.replicate.com/', { method: 'HEAD' })
+        .then(() => {
+          clearInterval(this._onlineProbe);
+          this._onlineProbe = null;
+          this.d.log('Connection restored — engine resuming', 'info');
+          this.resume();
+        })
+        .catch(() => { /* still offline */ });
+    }, 20000);
+  }
 
   retryFailed() {
     this.queue.update((items) => {
@@ -375,6 +423,7 @@ class Engine {
         }
       }
     });
+    this.notifyBatches();
     this.pump();
   }
 
@@ -397,8 +446,9 @@ class Engine {
       completedToday: this.completedToday,
       failed: q.filter((i) => i.status === 'failed').length,
       heldBatches: this.batches.data.filter((b) => b.status === 'held').length,
-      spendTodayUsd: Number(this.d.usage.sum().toFixed(3)),
+      spendTodayUsd: Number(this.d.usage.sumToday().toFixed(3)),
       paused: this.paused,
+      pausedReason: this.pausedReason ?? null,
       workers: [...this.workers.entries()].map(([lane, w]) => ({
         lane,
         batchId: w.item.batchId,

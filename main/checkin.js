@@ -3,7 +3,7 @@
 // Check-in screen degrades to manual register (available: false).
 class Checkin {
   /**
-   * @param {object} deps { settings, shoots, gallery: () => TurboIQGalleryClient|null, push }
+   * @param {object} deps { settings, shoots, gallery: Gallery service, push }
    */
   constructor(deps) {
     this.d = deps;
@@ -28,7 +28,11 @@ class Checkin {
   }
 
   setBlurred(blurred) {
-    this.intervalMs = blurred ? 15000 : 5000;
+    const next = blurred ? 15000 : 5000;
+    if (next !== this.intervalMs) {
+      this.intervalMs = next;
+      if (this.timer) this.start(); // recreate the interval at the new cadence
+    }
   }
 
   start() {
@@ -43,8 +47,12 @@ class Checkin {
 
   async poll() {
     const shoot = this.activeShoot();
-    const client = this.d.gallery();
-    if (!shoot?.serverShootId || !client || !client.isAuthenticated() || shoot.status !== 'live') {
+    // ensureAuthed logs in from stored creds — check-in must work right after
+    // an app restart, not only after some gallery screen happened to be opened.
+    const client = shoot?.serverShootId && shoot.status === 'live'
+      ? await this.d.gallery.ensureAuthed().catch(() => null)
+      : null;
+    if (!shoot?.serverShootId || !client || shoot.status !== 'live') {
       if (this.available || this.entries.length) {
         this.available = false;
         this.entries = [];
@@ -74,8 +82,8 @@ class Checkin {
    */
   async claim(entryId) {
     const shoot = this.activeShoot();
-    const client = this.d.gallery();
-    if (!shoot || !client) return { ok: false, error: 'No active shoot' };
+    const client = await this.d.gallery.ensureAuthed().catch(() => null);
+    if (!shoot || !client) return { ok: false, error: 'No active shoot or not signed in' };
     const entry = this.entries.find((e) => e.id === entryId);
     if (!entry) return { ok: false, error: 'Entry not in the waiting list' };
 
@@ -90,14 +98,19 @@ class Checkin {
     });
 
     const res = await client.useCheckinEntry(entryId, person.shootNumber);
-    if (!res.success && res.statusCode === 409) {
-      // Someone else claimed it between polls — roll back the person record.
+    if (!res.success) {
+      // Roll back the local person on ANY failure — a network blip here must
+      // not leave a phantom person while the server entry stays waiting
+      // (next poll would re-list it and a second claim would duplicate them).
       this.d.shoots.people.update((list) => {
         const i = list.findIndex((p) => p.id === person.id);
         if (i >= 0) list.splice(i, 1);
       });
       await this.poll();
-      return { ok: false, error: 'Entry was already claimed' };
+      return {
+        ok: false,
+        error: res.statusCode === 409 ? 'Entry was already claimed' : `Claim failed: ${res.error || 'network error'}`,
+      };
     }
 
     this.entries = this.entries.filter((e) => e.id !== entryId);

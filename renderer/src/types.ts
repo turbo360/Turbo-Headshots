@@ -39,6 +39,10 @@ export interface Shoot {
   folderPath: string | null;
   defaults: DispatchOpts;
   createdAt: string;
+  // Populated by shoots:list
+  peopleCount?: number;
+  frameCount?: number;
+  approvedCount?: number;
 }
 
 export interface FrameQuality {
@@ -122,6 +126,7 @@ export interface ProcessingStatus {
   heldBatches: number;
   spendTodayUsd: number;
   paused: boolean;
+  pausedReason: 'paused' | 'offline' | null;
   workers: WorkerLane[];
 }
 

@@ -1,10 +1,15 @@
 // All ipcMain handlers, grouped by domain. ctx carries every service.
-const { ipcMain, dialog, shell } = require('electron');
+const { ipcMain, dialog, shell, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { estimate } = require('../engine/cost');
 
 function registerIpc(ctx) {
+  const parentWin = () => BrowserWindow.getAllWindows()[0] ?? null;
+  const confirmBox = (opts) => {
+    const win = parentWin();
+    return win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
+  };
   const { app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater } = ctx;
 
   const h = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => fn(...args));
@@ -14,7 +19,13 @@ function registerIpc(ctx) {
   h('check-for-updates', () => updater.check());
   h('download-update', () => updater.download());
   h('install-update', () => updater.install());
-  h('open-folder', (p) => { if (p && fs.existsSync(p)) shell.openPath(p); });
+  h('open-folder', (p) => {
+    if (typeof p !== 'string' || !fs.existsSync(p)) return;
+    const roots = [settings.raw.outputFolder, settings.raw.watchFolder, app.getPath('userData')]
+      .filter(Boolean).map((r) => path.resolve(r));
+    const resolved = path.resolve(p);
+    if (roots.some((r) => resolved === r || resolved.startsWith(r + path.sep))) shell.openPath(resolved);
+  });
 
   /* ---------- settings ---------- */
   h('get-settings', () => settings.appSettings());
@@ -60,7 +71,15 @@ function registerIpc(ctx) {
   h('test-api-connection', (key) => replicate.testConnection(key));
 
   /* ---------- shoots ---------- */
-  h('shoots:list', () => shoots.listShoots());
+  h('shoots:list', () => shoots.listShoots().map((s) => {
+    const people = shoots.listPeople(s.id);
+    return {
+      ...s,
+      peopleCount: people.length,
+      frameCount: people.reduce((n, p) => n + p.frames.length, 0),
+      approvedCount: people.reduce((n, p) => n + p.frames.filter((f) => f.approved).length, 0),
+    };
+  }));
   h('shoots:get', (id) => {
     const shoot = shoots.getShoot(id);
     if (!shoot) return null;
@@ -84,7 +103,7 @@ function registerIpc(ctx) {
     if (!shoot) return { ok: false, error: 'Shoot not found' };
     const people = shoots.listPeople(id);
     const frames = people.reduce((n, p) => n + p.frames.length, 0);
-    const { response } = await dialog.showMessageBox({
+    const { response } = await confirmBox({
       type: 'warning',
       buttons: ['Cancel', 'Delete shoot'],
       defaultId: 0,
@@ -179,7 +198,7 @@ function registerIpc(ctx) {
   h('people:delete', async (personId) => {
     const person = shoots.getPerson(personId);
     if (!person) return { ok: false, error: 'Person not found' };
-    const { response } = await dialog.showMessageBox({
+    const { response } = await confirmBox({
       type: 'warning',
       buttons: ['Cancel', 'Delete subject'],
       defaultId: 0,

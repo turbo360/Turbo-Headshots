@@ -13,6 +13,8 @@ export default function DispatchSheet() {
 
   const count = target.files.length;
   const versions = opts.backdrops.length;
+  const ai = s.aiSettings;
+  const engineOn = !!(ai?.processingEnabled && ai?.hasApiKey && ai?.preset !== 'natural');
 
   useEffect(() => {
     let live = true;
@@ -66,11 +68,22 @@ export default function DispatchSheet() {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="kicker">Batch estimate</div>
-            <div className="mono" style={{ fontSize: 26, fontWeight: 700 }}>{usd(est.total)}</div>
-            <div className="muted mono" style={{ fontSize: 11.5 }}>{usd(est.perFrame)} / frame</div>
+            <div className="mono" style={{ fontSize: 26, fontWeight: 700 }}>{engineOn ? usd(est.total) : '$0.00'}</div>
+            <div className="muted mono" style={{ fontSize: 11.5 }}>
+              {engineOn ? `${usd(est.perFrame)} / frame` : 'local pipeline'}
+            </div>
           </div>
         </div>
 
+        {!engineOn && (
+          <div style={{
+            marginTop: 14, padding: '10px 14px', borderRadius: 10,
+            background: 'var(--pill-warning-bg, #FEF3C7)', color: 'var(--pill-warning-fg, #92400E)', fontSize: 13.5,
+          }}>
+            AI engine is off ({!ai?.hasApiKey ? 'no Replicate key' : ai?.preset === 'natural' ? 'Natural preset' : 'processing disabled'}) —
+            frames get the local pipeline only: colour-corrected crops, backdrops ignored, $0.
+          </div>
+        )}
         <div className="kicker" style={{ margin: '18px 0 10px' }}>Backdrop · pick any</div>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
           {BACKDROPS.map((b) => {

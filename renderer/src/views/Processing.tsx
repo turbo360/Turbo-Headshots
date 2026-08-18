@@ -29,6 +29,15 @@ export default function Processing() {
         </div>
       </div>
 
+      {p?.paused && p.pausedReason === 'offline' && (
+        <div className="card" style={{ borderColor: 'var(--status-warning)', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <Badge tone="warning">Offline</Badge>
+          <span className="muted" style={{ fontSize: 14 }}>
+            No internet — the engine paused itself and will resume automatically when the connection returns. Nothing is lost.
+          </span>
+        </div>
+      )}
+
       {(p?.failed ?? 0) > 0 && (
         <div className="card" style={{ borderColor: 'var(--status-danger)', display: 'flex', gap: 14, alignItems: 'center' }}>
           <Badge tone="danger">{p!.failed} failed</Badge>
@@ -62,6 +71,8 @@ export default function Processing() {
                   dispatchOpts: b.opts,
                 })}>Edit settings</Button>
                 <Button size="sm" variant="secondary" onClick={() => window.turbo.batches.start(b.id)}>Start</Button>
+                <Button size="sm" variant="ghost" style={{ color: 'var(--status-danger)' }}
+                  onClick={() => window.turbo.batches.remove(b.id)}>Remove</Button>
               </div>
             </div>
           ))}

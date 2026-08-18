@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { RAW_EXTS } = require('./shoots');
 
+const csvField = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+
 class Session {
   /**
    * @param {import('./settings').Settings} settings
@@ -58,6 +60,32 @@ class Session {
   }
 
   /**
+   * A RAW arriving after its sibling JPEG already registered the frame:
+   * copy it in under the frame's baseName and point the frame at it —
+   * never register a second frame for the same shutter press.
+   */
+  attachRaw(personId, baseName, rawPath) {
+    try {
+      const person = this.shoots.getPerson(personId);
+      if (!person) return;
+      const frame = person.frames.find((f) => f.baseName === baseName);
+      if (!frame) return;
+      const folder = path.dirname(frame.file);
+      const dest = path.join(folder, `${baseName}${path.extname(rawPath)}`);
+      fs.copyFileSync(rawPath, dest);
+      this.shoots.updatePerson(personId, (p) => {
+        const f = p.frames.find((x) => x.baseName === baseName);
+        if (f) {
+          if (!f.jpegFile) f.jpegFile = f.file; // the JPEG that registered it
+          f.file = dest;
+        }
+      });
+    } catch (err) {
+      console.error('[session] attachRaw failed:', err.message);
+    }
+  }
+
+  /**
    * A RAW (or JPEG-only) capture landed in the watch folder while a session is
    * active: copy + rename into the person folder (v1 save-session logic),
    * append the CSV row, register the frame, notify the renderer.
@@ -104,7 +132,10 @@ class Session {
     const sessionsFile = this.settings.raw.sessionsFile;
     if (sessionsFile) {
       try {
-        const csvLine = `"${shootNumber}","${new Date().toISOString()}","${person.firstName}","${person.lastName}","${person.email}","${person.mobile || ''}","${person.company || ''}","${path.basename(sourcePath)}","${baseName}${ext}","${sourcePath}","${newFilePath}","pending","","","","",""\n`;
+        const csvLine = [shootNumber, new Date().toISOString(), person.firstName, person.lastName,
+          person.email, person.mobile || '', person.company || '', path.basename(sourcePath),
+          `${baseName}${ext}`, sourcePath, newFilePath, 'pending', '', '', '', '', '']
+          .map(csvField).join(',') + '\n';
         fs.appendFileSync(sessionsFile, csvLine);
       } catch (err) {
         console.error('[session] CSV append failed:', err.message);

@@ -3,6 +3,7 @@
 // Aug 2026), so the input is capped at 1.55M px → ≈24.8MP output (A2 @ 300dpi
 // class). Pure pixel upscaler — never alters content.
 const fs = require('fs');
+const crypto = require('crypto');
 const sharp = require('sharp');
 
 const MAX_INPUT_PIXELS = 1_550_000;
@@ -14,8 +15,16 @@ const DEFAULT_SCALE = 4;
  * @param {string} outPath where to write the upscaled JPEG
  */
 async function upscaleToPrint(client, sourceBuf, outPath) {
+  // Cache is only valid for the SAME source render — a re-rendered frame must
+  // not serve the previous render's print.
+  const srcHash = crypto.createHash('sha1').update(sourceBuf).digest('hex');
+  const hashPath = `${outPath}.src.sha1`;
   if (fs.existsSync(outPath)) {
-    return { outPath, cached: true, predictionId: null };
+    try {
+      if (fs.readFileSync(hashPath, 'utf-8') === srcHash) {
+        return { outPath, cached: true, predictionId: null };
+      }
+    } catch { /* no hash sidecar — treat as stale */ }
   }
   const meta = await sharp(sourceBuf).metadata();
   const w = meta.width ?? 0;
@@ -38,6 +47,7 @@ async function upscaleToPrint(client, sourceBuf, outPath) {
   });
   const outBuf = await client.urlToBuffer(result.outputUrl);
   fs.writeFileSync(outPath, outBuf);
+  try { fs.writeFileSync(hashPath, srcHash); } catch { /* best effort */ }
   return { outPath, cached: false, predictionId: result.predictionId };
 }
 

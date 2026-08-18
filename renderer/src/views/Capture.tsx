@@ -61,12 +61,17 @@ export default function Capture() {
 
             <div style={{
               position: 'absolute', top: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8,
-              background: 'rgba(10,10,11,0.55)', backdropFilter: 'blur(6px)', borderRadius: 999,
+              background: !s.session.active && s.lastFrame ? 'rgba(220,38,38,0.92)' : 'rgba(10,10,11,0.55)',
+              backdropFilter: 'blur(6px)', borderRadius: 999,
               padding: '6px 14px',
             }}>
               <span className={`live-dot${s.session.active ? ' red' : ''}`} />
-              <span className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', color: '#fff' }}>
-                {s.session.active ? 'TETHERED' : 'IDLE'}{s.lastFrame?.baseName ? ` · ${s.lastFrame.baseName}` : ''}
+              <span className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', color: '#fff', fontWeight: 700 }}>
+                {s.session.active
+                  ? `TETHERED${s.lastFrame?.baseName ? ` · ${s.lastFrame.baseName}` : ''}`
+                  : s.lastFrame
+                    ? 'NOT RECORDING — frames arriving with no subject. Start a session.'
+                    : 'IDLE'}
               </span>
             </div>
           </div>

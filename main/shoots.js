@@ -8,6 +8,10 @@ const { JsonStore } = require('./store');
 const RAW_EXTS = ['.rw2', '.raw', '.arw', '.cr2', '.cr3', '.nef', '.orf', '.dng'];
 const uid = () => crypto.randomUUID();
 const nowIso = () => new Date().toISOString();
+const localDate = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 class ShootsStore {
   constructor(app, settings) {
@@ -21,7 +25,10 @@ class ShootsStore {
   /* ---------- shoot numbers (v1 logic, reused verbatim) ---------- */
 
   generateShootNumber() {
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    // LOCAL date — the UTC version stamped Melbourne-morning shoots with
+    // yesterday's date and reset the counter mid-morning.
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     let counter = { date: dateStr, count: 0 };
     if (fs.existsSync(this.counterPath)) {
       try {
@@ -44,7 +51,7 @@ class ShootsStore {
     const outputFolder = this.settings.raw.outputFolder;
     let folderPath = null;
     if (outputFolder) {
-      const d = (date || nowIso().slice(0, 10)).replace(/-/g, '');
+      const d = (date || localDate()).replace(/-/g, '');
       const yyyy = d.slice(0, 4);
       const mm = d.slice(4, 6);
       const safe = name.replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'Shoot';
@@ -53,7 +60,7 @@ class ShootsStore {
     }
     const shoot = {
       id: uid(),
-      name, client: client || '', date: date || nowIso().slice(0, 10), location: location || '',
+      name, client: client || '', date: date || localDate(), location: location || '',
       galleryId: galleryId ?? null,
       galleryName: galleryName ?? null,
       checkinSlug: checkinSlug ?? null,
@@ -162,8 +169,10 @@ class ShootsStore {
     let entries;
     try { entries = fs.readdirSync(out); } catch { return 0; }
     // v1 folders look like YYYYMMDD-NNN_Last_First
-    const legacy = entries.filter((e) => /^\d{8}-\d{3}_/.test(e) &&
-      fs.statSync(path.join(out, e)).isDirectory());
+    const legacy = entries.filter((e) => {
+      if (!/^\d{8}-\d{3}_/.test(e)) return false;
+      try { return fs.statSync(path.join(out, e)).isDirectory(); } catch { return false; }
+    });
     if (legacy.length === 0) return 0;
 
     const byDate = new Map();

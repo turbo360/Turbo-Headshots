@@ -13,6 +13,22 @@ const COST_USD = {
 class Usage {
   constructor(app) {
     this.file = path.join(app.getPath('userData'), 'usage.jsonl');
+    this._todayKey = null;
+    this._todaySum = null;
+  }
+
+  _todayStart() {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d;
+  }
+
+  /** Cached day total — incremented on record(), full scan only on day change. */
+  sumToday() {
+    const key = this._todayStart().toISOString();
+    if (this._todayKey !== key || this._todaySum === null) {
+      this._todayKey = key;
+      this._todaySum = this.sum(key);
+    }
+    return this._todaySum;
   }
 
   record({ tool, model, predictionId, costUsd, meta }) {
@@ -26,6 +42,9 @@ class Usage {
       fs.appendFileSync(this.file, JSON.stringify(row) + '\n');
     } catch (err) {
       console.error('[usage]', err.message);
+    }
+    if (this._todaySum !== null && this._todayKey === this._todayStart().toISOString()) {
+      this._todaySum += row.costUsd;
     }
     return row;
   }

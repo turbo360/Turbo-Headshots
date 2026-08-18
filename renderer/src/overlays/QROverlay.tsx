@@ -9,8 +9,8 @@ export default function QROverlay() {
   const lastEntry = s.checkin.entries[s.checkin.entries.length - 1];
 
   return (
-    <div className="overlay z-qr" onClick={(e) => { if (e.target === e.currentTarget) useStore.setState({ qrOpen: false }); }}>
-      <div className="sheet carbon" style={{
+    <div className="overlay z-qr qr-print-root" onClick={(e) => { if (e.target === e.currentTarget) useStore.setState({ qrOpen: false }); }}>
+      <div className="sheet carbon qr-print-sheet" style={{
         width: 'min(1000px, 92vw)', padding: '48px 40px',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, textAlign: 'center',
       }}>
@@ -26,7 +26,7 @@ export default function QROverlay() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span className="live-dot" />
               <span className="mono" style={{ fontSize: 12, letterSpacing: '0.14em', color: '#B9B6AF' }}>
-                {s.checkin.entries.length} CHECKED IN{lastEntry ? ` · LAST ${new Date(lastEntry.createdAt).toLocaleTimeString('en-AU', { hour12: false, hour: '2-digit', minute: '2-digit' })}` : ''}
+                {s.checkin.entries.length} WAITING{lastEntry ? ` · LAST ${new Date(lastEntry.createdAt).toLocaleTimeString('en-AU', { hour12: false, hour: '2-digit', minute: '2-digit' })}` : ''}
               </span>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>

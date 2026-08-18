@@ -306,3 +306,29 @@ body {
 @container tp (max-width: 720px) {
   .tb-chips { display: none; }
 }
+
+/* ---------- Print (QR A5 card) ---------- */
+
+@media print {
+  @page { size: A5 portrait; margin: 10mm; }
+  body { overflow: visible; background: #fff; }
+  .shell, .toast { display: none !important; }
+  .qr-print-root {
+    position: static !important;
+    background: #fff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .qr-print-sheet {
+    background: #fff !important;
+    color: #0A0A0B !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-height: none !important;
+    padding: 8mm !important;
+  }
+  .qr-print-sheet .ds-btn, .qr-print-sheet .live-dot { display: none !important; }
+  .qr-print-sheet .h-display { color: #0A0A0B !important; }
+  .qr-print-sheet .mono { color: #8E1822 !important; }
+}

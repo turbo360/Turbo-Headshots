@@ -49,7 +49,7 @@ export default function App() {
     { key: 'shoots', label: 'Shoots', icon: ICONS.shoots, badge: null },
     { key: 'checkin', label: 'Check-in', icon: ICONS.checkin, badge: s.checkin.entries.length ? String(s.checkin.entries.length) : null },
     { key: 'capture', label: 'Capture', icon: ICONS.capture, badge: s.session.active ? 'REC' : null },
-    { key: 'review', label: 'Review', icon: ICONS.review, badge: reviewCount > 0 && s.session.active ? String(reviewCount) : null },
+    { key: 'review', label: 'Review', icon: ICONS.review, badge: reviewCount > 0 ? String(reviewCount) : null },
     { key: 'processing', label: 'Processing', icon: ICONS.processing, badge: inFlight > 0 ? String(inFlight + (s.processing?.pending ?? 0)) : null },
     { key: 'gallery', label: 'Gallery Upload', icon: ICONS.gallery, badge: null },
     { key: 'delivery', label: 'Delivery', icon: ICONS.delivery, badge: null },
@@ -61,11 +61,18 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        const el = e.target as HTMLElement | null;
+        if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) { el.blur(); return; }
         const st = useStore.getState();
         if (st.newShootOpen) { useStore.setState({ newShootOpen: false }); return; }
         if (st.dispatchTarget) { useStore.setState({ dispatchTarget: null }); return; }
         if (st.qrOpen) { useStore.setState({ qrOpen: false }); return; }
-        if (st.session.active) { void window.turbo.session.end(); }
+        // Ending the session is a big deal mid-shoot: only from the shoot-day
+        // views, never silently.
+        if (st.session.active && (st.view === 'capture' || st.view === 'checkin')) {
+          void window.turbo.session.end();
+          st.showToast('Session ended — new captures are NOT being recorded', 'error');
+        }
       }
     };
     window.addEventListener('keydown', onKey);

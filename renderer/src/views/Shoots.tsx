@@ -6,7 +6,7 @@ import { fmtDate, shootStatusTone } from '../meta';
 export default function Shoots() {
   const s = useStore();
 
-  const totalPeople = s.shoots.length ? '—' : '0';
+  const totalPeople = s.shoots.reduce((n, x) => n + (x.peopleCount ?? 0), 0);
   const delivered = s.shoots.filter((x) => x.status === 'delivered').length;
 
   const open = async (id: string) => {
@@ -21,6 +21,7 @@ export default function Shoots() {
       <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
         <div className="stat-strip" style={{ flex: 1, minWidth: 260 }}>
           <div className="stat"><span className="kicker">Shoots</span><span className="v">{s.shoots.length}</span></div>
+          <div className="stat"><span className="kicker">People</span><span className="v">{totalPeople}</span></div>
           <div className="stat"><span className="kicker">Delivered</span><span className="v">{delivered}</span></div>
           <div className="stat"><span className="kicker">Live</span><span className="v">{s.shoots.filter((x) => x.status === 'live').length}</span></div>
         </div>
@@ -46,12 +47,12 @@ export default function Shoots() {
                 <div style={{ fontSize: 16.5, fontWeight: 600, marginTop: 2 }}>{shoot.name}</div>
                 <div className="muted" style={{ fontSize: 14 }}>{shoot.client || '—'}</div>
               </div>
-              <div className="stat-strip" style={{ flex: 1, minWidth: 220, gap: 12 }}>
+              <div className="stat-strip" style={{ flex: 1.4, minWidth: 300, gap: 12 }}>
+                <div className="stat"><span className="kicker">People</span><span className="v" style={{ fontSize: 18 }}>{shoot.peopleCount ?? 0}</span></div>
+                <div className="stat"><span className="kicker">Frames</span><span className="v" style={{ fontSize: 18 }}>{shoot.frameCount ?? 0}</span></div>
+                <div className="stat"><span className="kicker">Picks</span><span className="v" style={{ fontSize: 18 }}>{shoot.approvedCount ?? 0}</span></div>
                 <div className="stat"><span className="kicker">Status</span>
                   <Badge tone={shootStatusTone(shoot.status)}>{isActive ? 'Live · active' : shoot.status}</Badge>
-                </div>
-                <div className="stat"><span className="kicker">Gallery</span>
-                  <span style={{ fontSize: 13 }} className="ink2">{shoot.galleryName ?? 'None'}</span>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>

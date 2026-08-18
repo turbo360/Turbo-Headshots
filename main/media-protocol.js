@@ -24,6 +24,14 @@ function registerSchemes() {
 function registerMediaProtocol(app, allowedRoots) {
   const thumbDir = path.join(app.getPath('userData'), 'thumbs');
   fs.mkdirSync(thumbDir, { recursive: true });
+  // Age sweep: thumbnails are re-derivable — drop anything older than 30 days.
+  try {
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+    for (const f of fs.readdirSync(thumbDir)) {
+      const p = path.join(thumbDir, f);
+      try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch { /* skip */ }
+    }
+  } catch { /* best effort */ }
 
   protocol.handle('media', async (request) => {
     try {
@@ -38,10 +46,13 @@ function registerMediaProtocol(app, allowedRoots) {
       if (!fs.existsSync(resolved)) return new Response('Not found', { status: 404 });
 
       const ext = path.extname(resolved).toLowerCase();
-      const mime = MIME[ext] || 'application/octet-stream';
-      const w = Number(u.searchParams.get('w')) || 0;
+      const mime = MIME[ext];
+      // Images only — userData is an allowed root for thumbnails, and serving
+      // arbitrary bytes would hand the renderer settings.json (credentials).
+      if (!mime) return new Response('Forbidden', { status: 403 });
+      const w = Math.min(3200, Number(u.searchParams.get('w')) || 0);
 
-      if (!w || !MIME[ext]) {
+      if (!w) {
         return new Response(fs.readFileSync(resolved), { headers: { 'Content-Type': mime } });
       }
 

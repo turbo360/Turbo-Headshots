@@ -59,18 +59,24 @@ async function processRender(item, deps, frameCache) {
   const processedDir = path.join(personFolder, 'Processed');
   fs.mkdirSync(processedDir, { recursive: true });
 
-  /* ---- 01 PREPARE (cached per frame across backdrops) ---- */
+  /* ---- 01 PREPARE (cached per frame across backdrops; the cache holds a
+     PROMISE so 4 parallel backdrop workers share one in-flight prepare
+     instead of each paying for their own) ---- */
   onStage('prepare', STAGES.prepare, 5);
-  let prep = frameCache.get('prep');
-  if (!prep) {
-    const workingPath = await local.resolveWorkingImage(frame, personFolder, settings.raw.watchFolder);
-    if (!workingPath) {
-      throw new Error('No JPEG available and RAW conversion failed — enable RAW+JPEG on camera or install exiftool');
-    }
-    const prepared = await client.prepareImageForHeadshot(fs.readFileSync(workingPath));
-    prep = { ...prepared, workingPath };
-    frameCache.set('prep', prep);
+  let prepPromise = frameCache.get('prep');
+  if (!prepPromise) {
+    prepPromise = (async () => {
+      const workingPath = await local.resolveWorkingImage(frame, personFolder, settings.raw.watchFolder);
+      if (!workingPath) {
+        throw new Error('No JPEG available and RAW conversion failed — enable RAW+JPEG on camera or install exiftool');
+      }
+      const prepared = await client.prepareImageForHeadshot(fs.readFileSync(workingPath));
+      return { ...prepared, workingPath };
+    })();
+    frameCache.set('prep', prepPromise);
+    prepPromise.catch(() => frameCache.delete('prep')); // don't cache failures
   }
+  const prep = await prepPromise;
 
   /* ---- 02 GUARD-IN (fail-soft, cached per frame) ---- */
   let inputAlpha = null;
@@ -78,24 +84,23 @@ async function processRender(item, deps, frameCache) {
   let torsoDataUri = null;
   if (opts.keepClothing) {
     onStage('guardIn', STAGES.guardIn, 15);
-    const cached = frameCache.get('guardIn');
-    if (cached !== undefined) {
-      ({ inputAlpha, inputTorsoBuf, torsoDataUri } = cached ?? {});
-      if (cached === null) flags.push('guardInFailed');
-    } else {
-      try {
-        inputAlpha = await guard.personAlpha(client, toDataUri(prep.buffer));
-        usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: inputAlpha.predictionId });
-        const torso = guard.torsoRegion(inputAlpha.bbox, prep.width, prep.height);
-        inputTorsoBuf = await guard.cropRegion(prep.buffer, torso);
-        torsoDataUri = toDataUri(inputTorsoBuf);
-        frameCache.set('guardIn', { inputAlpha, inputTorsoBuf, torsoDataUri });
-      } catch (err) {
-        console.error('[engine] input guard (non-fatal):', err.message);
-        flags.push('guardInFailed');
-        frameCache.set('guardIn', null);
-        inputAlpha = null; inputTorsoBuf = null; torsoDataUri = null;
-      }
+    let guardPromise = frameCache.get('guardIn');
+    if (!guardPromise) {
+      guardPromise = (async () => {
+        const alpha = await guard.personAlpha(client, toDataUri(prep.buffer));
+        usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: alpha.predictionId });
+        const torso = guard.torsoRegion(alpha.bbox, prep.width, prep.height);
+        const torsoBuf = await guard.cropRegion(prep.buffer, torso);
+        return { inputAlpha: alpha, inputTorsoBuf: torsoBuf, torsoDataUri: toDataUri(torsoBuf) };
+      })();
+      frameCache.set('guardIn', guardPromise);
+    }
+    try {
+      ({ inputAlpha, inputTorsoBuf, torsoDataUri } = await guardPromise);
+    } catch (err) {
+      console.error('[engine] input guard (non-fatal):', err.message);
+      flags.push('guardInFailed');
+      inputAlpha = null; inputTorsoBuf = null; torsoDataUri = null;
     }
   }
 
@@ -200,13 +205,17 @@ async function processRender(item, deps, frameCache) {
   if (opts.cutout) {
     try {
       let cutoutPng;
+      const locked = flags.includes('pixelLocked');
       if (opts.matte === 'birefnet') {
         const meta = await sharp(renderBuf).metadata();
         const bi = await client.runBirefnet(toDataUri(renderBuf), `${meta.width}x${meta.height}`);
         usage.record({ tool: 'cutout', model: 'men1scus/birefnet', predictionId: bi.predictionId });
         cutoutPng = await client.urlToBuffer(bi.outputUrl);
-      } else if (outAlpha) {
-        cutoutPng = outAlpha.png; // reuse the guard-out matte — no extra call
+      } else if (outAlpha && !locked) {
+        // reuse the guard-out matte — no extra call. NOT valid after pixel-lock:
+        // that matte was cut from the pre-lock render and would ship the
+        // AI-drawn garment in the transparent PNGs.
+        cutoutPng = outAlpha.png;
       } else {
         const rb = await client.runRemoveBackground(toDataUri(renderBuf));
         usage.record({ tool: 'cutout', model: '851-labs/background-remover', predictionId: rb.predictionId });

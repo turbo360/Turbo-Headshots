@@ -91,7 +91,13 @@ export const useStore = create<State>((set, get) => ({
   version: '',
 
   set: (p) => set(p),
-  go: (view) => set({ view, qrOpen: false }),
+  go: (view) => set((s) => ({
+    view,
+    qrOpen: false,
+    // Leaving the dashboard context: Delivery/Review etc must not silently
+    // target a stale detail shoot.
+    detailShootId: view === 'shootDetail' || view === 'review' ? s.detailShootId : null,
+  })),
   showToast: (msg, tone = 'info') => {
     set({ toast: { msg, tone } });
     setTimeout(() => { if (get().toast?.msg === msg) set({ toast: null }); }, 4000);

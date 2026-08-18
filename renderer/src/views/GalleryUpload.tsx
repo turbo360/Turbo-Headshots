@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useStore } from '../state/store';
+import { useStore, activeShoot } from '../state/store';
 import { Badge, Button, Input, SwitchRow } from '../components/ds';
 
 export default function GalleryUpload() {
@@ -15,6 +15,7 @@ export default function GalleryUpload() {
     });
   }, [g?.isAuthenticated]);
 
+  const shoot = activeShoot(s);
   const doneToday = s.transfers.filter((t) => t.status === 'done').length;
   const failed = s.transfers.filter((t) => t.status === 'failed');
 
@@ -50,8 +51,11 @@ export default function GalleryUpload() {
         <div style={{ flex: 2, minWidth: 260 }}>
           <div className="kicker">Uploading to</div>
           <div className="h-display" style={{ fontSize: 24, margin: '8px 0' }}>
-            {g.selectedGalleryName ?? 'No gallery selected'}
+            {shoot?.galleryName ?? g.selectedGalleryName ?? 'No gallery selected'}
           </div>
+          {shoot?.galleryName && (
+            <div className="kicker" style={{ marginBottom: 4 }}>Set by the active shoot</div>
+          )}
           <div style={{ fontSize: 13, color: '#B9B6AF' }}>{g.username}</div>
         </div>
         <div className="stat-strip" style={{ flex: 1, minWidth: 240 }}>

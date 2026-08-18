@@ -23,6 +23,11 @@ class SidecarClient {
     this.proc = spawn(this.binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
 
     this.proc.stdout.setEncoding('utf8');
+    this.proc.stdin.on('error', (err) => {
+      // Sidecar died mid-write: EPIPE here must not crash the app; pending
+      // calls are rejected by the 'exit' handler.
+      console.error('[sidecar] stdin error:', err.code || err.message);
+    });
     this.proc.stdout.on('data', (chunk) => this._onStdout(chunk));
     this.proc.stderr.setEncoding('utf8');
     this.proc.stderr.on('data', (chunk) => {
@@ -89,7 +94,12 @@ class SidecarClient {
       });
 
       const payload = JSON.stringify({ id, method, params }) + '\n';
-      this.proc.stdin.write(payload);
+      this.proc.stdin.write(payload, (err) => {
+      if (err) {
+        const pending = this.pending.get(id);
+        if (pending) { this.pending.delete(id); pending.reject(new Error(`sidecar write failed: ${err.code || err.message}`)); }
+      }
+    });
     });
   }
 

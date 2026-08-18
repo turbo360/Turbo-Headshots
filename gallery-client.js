@@ -467,18 +467,30 @@ class TurboIQGalleryClient {
         const created = await this.createGallery(gname, shootDate || undefined);
         if (created.success) {
           gid = created.gallery.id;
-        } else if (/already exists/i.test(created.error || '')) {
+        } else if (created.statusCode === 400 || /already exists/i.test(created.error || '')) {
+          // A gallery with this name exists. Only reuse it when its event_date
+          // matches this shoot — silently attaching to an old client's gallery
+          // (whose share link is already in their inbox) is a privacy leak.
           const list = await this.listGalleries();
           const match = list.success && list.galleries.find((g) => g.name === gname);
-          if (match) gid = match.id;
+          if (match && shootDate && match.event_date === shootDate) {
+            gid = match.id;
+          } else if (match) {
+            return {
+              success: false, galleryId: null,
+              error: `A gallery named "${gname}" already exists (event ${match.event_date || 'unknown'}). Pick a unique gallery name, or link it explicitly.`,
+            };
+          }
         }
-        if (!gid) return { success: false, error: created.error || 'Could not create gallery' };
+        if (!gid) return { success: false, galleryId: null, error: created.error || 'Could not create gallery' };
       }
       const result = await this.request('/shoots', {
         method: 'POST',
         body: { name, client, shoot_date: shootDate, location, gallery_id: gid },
       });
-      if (!result.success) return { success: false, error: result.error };
+      // On failure still return the gallery we created so the caller can
+      // retry/link it instead of stranding an orphan.
+      if (!result.success) return { success: false, error: result.error, galleryId: gid };
       return {
         success: true,
         shoot: result.data,
