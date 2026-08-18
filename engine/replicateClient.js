@@ -10,7 +10,13 @@ const POLL_INTERVAL_MS = 1500;
 const MAX_POLL_ATTEMPTS = 120; // ~3 minutes
 
 const NANO_BANANA_PRO_MODEL = 'google/nano-banana-pro';
+// CodeFormer is a community model with no official deployment — the slug
+// shortcut 404s (confirmed live 2026-08-18); run via /v1/predictions with a
+// pinned, env-overridable version hash.
 const CODEFORMER_MODEL = 'sczhou/codeformer';
+const CODEFORMER_VERSION =
+  process.env.REPLICATE_CODEFORMER_VERSION ||
+  '7de2ea26c616d5bf2245ad0d5e24f0ff9a6204578a5c876db53142edd9d2cd56';
 const REAL_ESRGAN_MODEL = 'nightmareai/real-esrgan';
 const REMOVE_BG_MODEL = '851-labs/background-remover'; // InSPyReNet — soft alpha, preserves resolution
 const REMOVE_BG_VERSION =
@@ -170,7 +176,7 @@ class ReplicateClient {
       upscale: 1,
       codeformer_fidelity: 0.7,
       ...input,
-    });
+    }, 3, CODEFORMER_VERSION);
   }
 
   /** InSPyReNet: threshold 0 = soft alpha (hair/fine edges); preserves resolution. */

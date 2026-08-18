@@ -1,5 +1,19 @@
 # Turbo Headshots - Development Guide
 
+> **v2 (2026-08-18):** the app was rebuilt as an "operations cockpit" (branch
+> `turbo-headshots-v2`). The renderer is now **React + Vite** (`renderer/`,
+> contextIsolation on, preload whitelist in `preload.js`); the AI pipeline is the
+> **Turbo Enhance headshot engine** (`engine/`: nano-banana-pro 4K re-render,
+> branding guard + pixel-lock, CodeFormer, InSPyReNet/BiRefNet cut-outs,
+> Real-ESRGAN print, 4-worker queue with held batches); shoots/people/batches
+> persist in `userData/store/*.json` (`main/`); QR self check-in is served by
+> turbo-iq (`/api/public/checkin/{slug}` + `/checkin/{slug}` page).
+> `TURBO_V1=1 npm start` boots the legacy app (main-v1.js + index.html).
+> Dev: `npm run dev` (Vite HMR). Engine harness: `REPLICATE_API_TOKEN=… node
+> engine/selftest.js <portrait.jpg> [backdrop] [framing]`.
+> Sections below describe v1 and remain accurate only for the v1 fallback path.
+
+
 ## Overview
 
 Turbo Headshots is an Electron-based desktop application for professional headshot photography workflows. It integrates with LUMIX Tether for camera control, processes photos through AI enhancement pipelines via Replicate API, and uploads finished headshots to Turbo IQ Gallery for client delivery.
