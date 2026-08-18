@@ -70,7 +70,8 @@
       ],
       "notarize": {
         "teamId": "ETURVK9WSA"
-      }
+      },
+      "x64ArchFiles": "Contents/Resources/HeadshotSidecar"
     },
     "extraResources": [
       {
