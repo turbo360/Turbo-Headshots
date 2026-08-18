@@ -35,8 +35,15 @@ export default function ShootDetail() {
           <div className="stat"><span className="kicker">Frames</span><span className="v">{frames}</span></div>
           <div className="stat"><span className="kicker">Delivered</span><span className="v">{deliveredCount}</span></div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <Button variant="secondary" onClick={() => s.go('shoots')}>All shoots</Button>
+          <Button variant="ghost" onClick={async () => {
+            const r = await window.turbo.shoots.remove(shoot.id);
+            if (r.ok) {
+              s.showToast('Shoot deleted (photos on disk kept)', 'success');
+              s.go('shoots');
+            }
+          }}>Delete shoot</Button>
           <Button
             variant="primary"
             disabled={frames === 0}
@@ -81,7 +88,7 @@ export default function ShootDetail() {
                 <div className="stat"><span className="kicker">Picks</span><span className="v" style={{ fontSize: 18 }}>{picks}</span></div>
               </div>
               <Badge tone={del.tone}>{del.label}</Badge>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <Button size="sm" variant="ghost" onClick={() => {
                   useStore.setState({ reviewPersonId: p.id });
                   s.go('review');
@@ -92,6 +99,21 @@ export default function ShootDetail() {
                   onClick={() => reprocess(p.id, `${p.firstName} ${p.lastName}`, p.frames.map((f) => f.baseName), p.shootNumber)}
                 >
                   Reprocess
+                </Button>
+                <Button size="sm" variant="dark" onClick={async () => {
+                  // Re-open this subject: activates the shoot and resumes their
+                  // session — new captures continue their numbering.
+                  await window.turbo.session.start(p.id);
+                  s.go('capture');
+                }}>
+                  Continue shooting
+                </Button>
+                <Button size="sm" variant="ghost" style={{ color: 'var(--status-danger)' }}
+                  onClick={async () => {
+                    const r = await window.turbo.people.remove(p.id);
+                    if (r.ok) s.showToast('Subject deleted (photos on disk kept)', 'success');
+                  }}>
+                  Delete
                 </Button>
               </div>
             </div>

@@ -152,6 +152,28 @@ class Engine {
     }
   }
 
+  /**
+   * Drop all batches + pending queue items for a deleted shoot or person.
+   * In-flight items are left to finish; finishItem tolerates a missing batch.
+   */
+  purgeBatches({ shootId, personId }) {
+    const match = (x) =>
+      (shootId && x.shootId === shootId) || (personId && x.personId === personId);
+    const batchIds = new Set(this.batches.data.filter(match).map((b) => b.id));
+    this.queue.update((items) => {
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (batchIds.has(items[i].batchId) && items[i].status !== 'processing') items.splice(i, 1);
+      }
+    });
+    this.batches.update((list) => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (batchIds.has(list[i].id)) list.splice(i, 1);
+      }
+    });
+    for (const id of batchIds) this.frameCachesClear(id);
+    this.notifyBatches();
+  }
+
   engineAvailable() {
     return !!(this.d.settings.raw.processingEnabled && this.d.settings.raw.replicateApiKey
       && this.d.settings.raw.preset !== 'natural');

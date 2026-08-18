@@ -79,6 +79,39 @@ function registerIpc(ctx) {
     push('shoots:changed', {});
     return s;
   });
+  h('shoots:delete', async (id) => {
+    const shoot = shoots.getShoot(id);
+    if (!shoot) return { ok: false, error: 'Shoot not found' };
+    const people = shoots.listPeople(id);
+    const frames = people.reduce((n, p) => n + p.frames.length, 0);
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Delete shoot'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Delete "${shoot.name}"?`,
+      detail: `Removes the shoot, ${people.length} ${people.length === 1 ? 'subject' : 'subjects'} and ${frames} frame record${frames === 1 ? '' : 's'} from the app. Photos on disk and the Turbo IQ gallery are NOT touched.`,
+    });
+    if (response !== 1) return { ok: false, cancelled: true };
+
+    // End the session if it belongs to this shoot.
+    const st = session.state();
+    if (st.active && people.some((p) => p.id === st.personId)) session.end();
+    engine.purgeBatches({ shootId: id });
+    // Best-effort: close the public check-in link server-side.
+    if (shoot.serverShootId) {
+      try {
+        const client = await gallery.ensureAuthed();
+        if (client) await client.updateShoot(shoot.serverShootId, { status: 'closed' });
+      } catch { /* non-fatal */ }
+    }
+    shoots.deleteShoot(id);
+    if (settings.raw.activeShootId === id) settings.patch({ activeShootId: null });
+    push('shoots:changed', {});
+    push('people:changed', {});
+    void checkin.poll();
+    return { ok: true };
+  });
   h('shoots:create', async (data) => {
     try {
       let server = null;
@@ -143,7 +176,38 @@ function registerIpc(ctx) {
       return { ok: false, error: err.message };
     }
   });
-  h('session:start', (personId) => session.start(personId));
+  h('people:delete', async (personId) => {
+    const person = shoots.getPerson(personId);
+    if (!person) return { ok: false, error: 'Person not found' };
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Delete subject'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Delete ${person.firstName} ${person.lastName} (${person.shootNumber})?`,
+      detail: `Removes the subject and ${person.frames.length} frame record${person.frames.length === 1 ? '' : 's'} from the app. Photos on disk are NOT touched.`,
+    });
+    if (response !== 1) return { ok: false, cancelled: true };
+
+    const st = session.state();
+    if (st.active && st.personId === personId) session.end();
+    engine.purgeBatches({ personId });
+    shoots.deletePerson(personId);
+    push('people:changed', {});
+    return { ok: true };
+  });
+  h('session:start', (personId) => {
+    // Re-opening a subject from a non-active shoot activates that shoot so the
+    // watcher routes new captures into the right folder + numbering.
+    const person = shoots.getPerson(personId);
+    if (person && settings.raw.activeShootId !== person.shootId) {
+      settings.patch({ activeShootId: person.shootId });
+      shoots.updateShoot(person.shootId, { status: 'live' });
+      push('shoots:changed', {});
+      void checkin.poll();
+    }
+    return session.start(personId);
+  });
   h('session:end', () => {
     const st = session.end();
     if (settings.raw.holdUntilShootEnd) {

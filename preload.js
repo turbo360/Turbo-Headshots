@@ -43,10 +43,12 @@ contextBridge.exposeInMainWorld('turbo', {
     get: invoke('shoots:get'),
     setActive: invoke('shoots:set-active'),
     update: invoke('shoots:update'),
+    remove: invoke('shoots:delete'),
   },
   people: {
     create: invoke('people:create'),
     list: invoke('people:list'),
+    remove: invoke('people:delete'),
   },
   session: {
     start: invoke('session:start'),

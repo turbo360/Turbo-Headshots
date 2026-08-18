@@ -220,11 +220,13 @@ export interface TurboApi {
     get(id: string): Promise<{ shoot: Shoot; people: Person[]; batches: Batch[] } | null>;
     setActive(id: string | null): Promise<void>;
     update(id: string, patch: Partial<Shoot>): Promise<Shoot>;
+    remove(id: string): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
   };
   people: {
     create(data: { firstName: string; lastName: string; email: string; mobile: string; company: string; shootId: string })
       : Promise<{ ok: boolean; person?: Person; error?: string }>;
     list(shootId: string): Promise<Person[]>;
+    remove(personId: string): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
   };
   session: {
     start(personId: string): Promise<SessionState>;

@@ -60,6 +60,11 @@ export default function Shoots() {
                     await window.turbo.shoots.setActive(shoot.id);
                   }}>Make active</Button>
                 )}
+                <Button size="sm" variant="ghost" style={{ color: 'var(--status-danger)' }}
+                  onClick={async () => {
+                    const r = await window.turbo.shoots.remove(shoot.id);
+                    if (r.ok) s.showToast('Shoot deleted (photos on disk kept)', 'success');
+                  }}>Delete</Button>
                 <Button size="sm" variant="secondary" onClick={() => open(shoot.id)}>Open</Button>
               </div>
             </div>

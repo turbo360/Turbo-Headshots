@@ -78,6 +78,27 @@ class ShootsStore {
     return out;
   }
 
+  /** Remove the shoot record and its people. Files on disk are never touched. */
+  deleteShoot(id) {
+    this.people.update((list) => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].shootId === id) list.splice(i, 1);
+      }
+    });
+    this.shoots.update((list) => {
+      const i = list.findIndex((x) => x.id === id);
+      if (i >= 0) list.splice(i, 1);
+    });
+  }
+
+  /** Remove one person record. Files on disk are never touched. */
+  deletePerson(id) {
+    this.people.update((list) => {
+      const i = list.findIndex((x) => x.id === id);
+      if (i >= 0) list.splice(i, 1);
+    });
+  }
+
   /* ---------- people ---------- */
 
   listPeople(shootId) {
