@@ -197,6 +197,13 @@ app.whenReady().then(() => {
 
   /* ---------- boot ---------- */
   const boot = (label, fn) => { try { fn(); } catch (err) { console.error(`[boot] ${label}:`, err.message); fileLog(`BOOT ${label} failed: ${err.message}`); } };
+  boot('faceRestore migration', () => {
+    if (!settings.raw.shootFaceRestoreMigrated) {
+      shoots.shoots.update((list) => { for (const s of list) if (s.defaults) s.defaults.faceRestore = false; });
+      engine.batches.update((list) => { for (const b of list) if (b.status === 'held' && b.opts) b.opts.faceRestore = false; });
+      settings.patch({ shootFaceRestoreMigrated: true });
+    }
+  });
   boot('importLegacyFolders', () => shoots.importLegacyFolders());
   boot('watcher', () => watcher.start());
   boot('checkin', () => checkin.start());

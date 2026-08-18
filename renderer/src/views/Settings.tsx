@@ -95,7 +95,7 @@ export default function Settings() {
                 on={ai.processEveryFrame} onChange={(v) => patchAi({ processEveryFrame: v })} />
               <SwitchRow title="Keep original clothing by default" desc="Branding guard on — garment logos protected"
                 on={ai.defaultDispatchOpts.keepClothing} onChange={(v) => patchOpts({ keepClothing: v })} />
-              <SwitchRow title="Face restore by default" desc="CodeFormer finishing pass"
+              <SwitchRow title="Face restore by default" desc="Leave OFF — faces ship exactly as rendered, matching Turbo Enhance. CodeFormer can distort large sharp faces."
                 on={ai.defaultDispatchOpts.faceRestore} onChange={(v) => patchOpts({ faceRestore: v })} />
               <SwitchRow title="Hold batches until the shoot ends" desc="Dispatched batches queue as Held and start together"
                 on={ai.holdUntilShootEnd} onChange={(v) => patchAi({ holdUntilShootEnd: v })} />

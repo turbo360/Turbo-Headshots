@@ -124,7 +124,7 @@ export default function DispatchSheet() {
             <div className="kicker" style={{ marginBottom: 4 }}>Protection & polish</div>
             <SwitchRow title="Keep original clothing" desc="Branding guard — garment logos protected"
               on={opts.keepClothing} onChange={(v) => patch({ keepClothing: v })} />
-            <SwitchRow title="Face restore" desc="CodeFormer finishing pass"
+            <SwitchRow title="Face restore" desc="Off = faces exactly as rendered (matches Turbo Enhance). CodeFormer can distort large sharp faces."
               on={opts.faceRestore} onChange={(v) => patch({ faceRestore: v })} />
             <SwitchRow title="Preserve eyewear" desc="Explicit keep-glasses prompt line"
               on={opts.glasses} onChange={(v) => patch({ glasses: v })} />

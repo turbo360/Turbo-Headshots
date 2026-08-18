@@ -7,7 +7,10 @@ const DEFAULT_DISPATCH_OPTS = {
   backdrops: ['grey'],
   framing: 'chest-up',
   keepClothing: true,
-  faceRestore: true,
+  // OFF: CodeFormer distorts large sharp faces (waxy skin, doubled features)
+  // — and live Turbo Enhance output has run WITHOUT it since the model's
+  // hosted deployment vanished. Faces ship exactly as Nano Banana renders.
+  faceRestore: false,
   glasses: false,
   portrait: true,
   square: true,
@@ -50,6 +53,11 @@ class Settings {
     r.activeShootId = r.activeShootId ?? null;
     r.activeSession = r.activeSession ?? null;
     r.defaultDispatchOpts = { ...DEFAULT_DISPATCH_OPTS, ...(r.defaultDispatchOpts || {}) };
+    // One-time migration (v2.4.1): flip pre-existing faceRestore defaults off.
+    if (!r.faceRestoreMigrated) {
+      r.defaultDispatchOpts.faceRestore = false;
+      r.faceRestoreMigrated = true;
+    }
     // gallery keys (v1 names kept)
     r.galleryUsername = r.galleryUsername || '';
     r.galleryPassword = r.galleryPassword || '';
