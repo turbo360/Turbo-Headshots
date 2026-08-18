@@ -233,21 +233,28 @@ console.log(result);  // { success: true, photo: {...} }
 
 ### GitHub Actions Release
 
-Releases are triggered by pushing a version tag:
+**Releases are cut from the `turbo360/Turbo-Headshots` repo** (NOT the monorepo):
+that repo holds the Apple signing secrets AND is the electron-updater feed
+(`package.json > publish`), so installed apps only see releases created there.
+The monorepo's `release-turbo-headshots.yml` stays broken-by-design until the
+five APPLE_*/CSC_* secrets are copied over.
+
+Flow (from the monorepo root, after merging to `main`):
 
 ```bash
-# Update version in package.json
-npm version 1.6.0 --no-git-tag-version
-
-# Commit changes
-git add -A
-git commit -m "v1.6.0 - Feature description"
-git push origin main
-
-# Create and push tag to trigger build
-git tag -a v1.6.0 -m "Release notes..."
-git push origin v1.6.0
+# 1. Bump version in turbo-headshots/package.json, commit to main
+# 2. Split the subfolder into its own tree and push it to the release repo
+git subtree split --prefix=turbo-headshots main -b headshots-split
+git push -f headshots-release headshots-split:main   # remote: turbo360/Turbo-Headshots
+# 3. Tag the split head and push the tag — this triggers .github/workflows/release.yml
+git tag -a v2.0.0 headshots-split -m "Release notes…"
+git push headshots-release v2.0.0
+git branch -D headshots-split
 ```
+
+`turbo-headshots/.github/workflows/release.yml` is inert in the monorepo and
+becomes the repo-root workflow after the split (renderer build + universal
+sidecar + sign + notarize + GitHub release).
 
 **Workflow:** `.github/workflows/release.yml`
 - Runs on: `macos-latest`
