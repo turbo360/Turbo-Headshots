@@ -47,7 +47,8 @@ export default function Delivery() {
             }}>Copy link</Button>
             <Button size="sm" variant="primary" disabled={remaining === 0} onClick={async () => {
               const r = await window.turbo.delivery.sendAll(shoot.id);
-              s.showToast(r.ok ? `Sent ${r.sent} links` : 'Send failed', r.ok ? 'success' : 'error');
+              const waitNote = r.waiting ? ` · ${r.waiting} waiting for photos` : '';
+              s.showToast(r.ok ? `Sent ${r.sent} personal link${r.sent === 1 ? '' : 's'}${waitNote}` : 'Send failed', r.ok ? 'success' : 'error');
             }}>Send {remaining} remaining links</Button>
           </div>
         </div>
@@ -66,12 +67,27 @@ export default function Delivery() {
                 <div className="muted" style={{ fontSize: 13 }}>{p.email || 'no email'}</div>
               </div>
               <span className="muted" style={{ fontSize: 13 }}>{picks} picks</span>
+              {p.iq?.headshotUrl ? (
+                <Button size="sm" variant="ghost" title="Copy their personal photos link"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(p.iq!.headshotUrl);
+                    s.showToast(`Personal link copied for ${p.firstName}`, 'success');
+                  }}>
+                  Personal link
+                </Button>
+              ) : (
+                <Badge tone="neutral">No delivery</Badge>
+              )}
               <Badge tone={del.tone}>{del.label}</Badge>
               <Button size="sm" variant={p.delivery.status === 'not-sent' ? 'primary' : 'ghost'}
                 disabled={!p.email}
                 onClick={async () => {
                   const r = await window.turbo.delivery.sendLink(p.id);
-                  s.showToast(r.ok ? 'Link sent' : (r.error ?? 'Send failed'), r.ok ? 'success' : 'error');
+                  s.showToast(
+                    r.ok
+                      ? (r.personal ? `Personal photos link emailed to ${p.firstName}` : 'Gallery link draft opened')
+                      : (r.error ?? 'Send failed'),
+                    r.ok ? 'success' : 'error');
                 }}>
                 {p.delivery.status === 'not-sent' ? 'Send' : 'Resend'}
               </Button>

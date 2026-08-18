@@ -14,6 +14,7 @@ const { Session } = require('./main/session');
 const { Watcher } = require('./main/watcher');
 const { Checkin } = require('./main/checkin');
 const { Gallery } = require('./main/gallery');
+const { Deliveries } = require('./main/deliveries');
 const { registerIpc } = require('./main/ipc');
 const { Engine } = require('./engine/queue');
 const { ReplicateClient } = require('./engine/replicateClient');
@@ -90,7 +91,9 @@ app.whenReady().then(() => {
   const replicate = new ReplicateClient(() => settings.raw.replicateApiKey);
   const gallery = new Gallery({ app, settings, shoots, push });
   const session = new Session(settings, shoots, push);
-  const checkin = new Checkin({ settings, shoots, gallery, push });
+  const deliveries = new Deliveries({ settings, shoots, gallery, push });
+  gallery.d.deliveries = deliveries;
+  const checkin = new Checkin({ settings, shoots, gallery, push, deliveries });
 
   const engine = globalThis.__engine = new Engine({
     app, settings, shoots,
@@ -99,7 +102,7 @@ app.whenReady().then(() => {
     usage,
     push,
     log: (message, type = 'info') => { fileLog(`[${type}] ${message}`); push('processing-log', { message, type }); },
-    onOutputs: (batch, person, item) => gallery.uploadItemOutputs(batch, item),
+    onOutputs: (batch, person, item) => gallery.uploadItemOutputs(batch, item, person),
   });
 
   // Quality checks run one at a time in the background (unwired-in-v1 sidecar capability).
@@ -164,7 +167,7 @@ app.whenReady().then(() => {
   };
 
   registerIpc({
-    app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater,
+    app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater, deliveries,
   });
 
   /* ---------- window ---------- */

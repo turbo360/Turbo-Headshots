@@ -113,6 +113,12 @@ class Checkin {
       };
     }
 
+    this.d.shoots.updatePerson(person.id, (p) => { p.checkinEntryId = entryId; });
+    // Fire-and-forget: their personal IQ headshot delivery (fail-soft; other
+    // call sites lazily retry).
+    if (this.d.deliveries) {
+      void this.d.deliveries.ensureForPerson(person.id, { checkinEntryId: entryId });
+    }
     this.entries = this.entries.filter((e) => e.id !== entryId);
     this.d.push('checkin:waiting', this.state());
     this.d.push('people:changed', {});

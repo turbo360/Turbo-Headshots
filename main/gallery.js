@@ -62,7 +62,17 @@ class Gallery {
   }
 
   /** Upload a completed render item's outputs to the batch's shoot gallery. */
-  async uploadItemOutputs(batch, item) {
+  async uploadItemOutputs(batch, item, person) {
+    // Lazy safety net: the person's IQ delivery may not exist yet (offline at
+    // registration). Ensure it before their photos land so auto-match groups
+    // them from the first upload. Single-flight inside Deliveries.
+    if (person && !person.iq?.deliveryId && this.d.deliveries) {
+      await this.d.deliveries.ensureForPerson(person.id).catch(() => {});
+    }
+    return this._uploadItemOutputs(batch, item);
+  }
+
+  async _uploadItemOutputs(batch, item) {
     const r = this.d.settings.raw;
     if (!r.galleryAutoUpload) return;
     const shoot = this.d.shoots.getShoot(batch.shootId);

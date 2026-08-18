@@ -561,6 +561,55 @@ class TurboIQGalleryClient {
     } catch (e) { return { success: false, error: e.message }; }
   }
 
+  /* ========== Per-person headshot deliveries (Turbo Headshots v2.4) ========== */
+
+  /** Idempotent create/update of a prefix-matched delivery for one subject. */
+  async ensureHeadshotDelivery(galleryId, payload) {
+    try {
+      const result = await this.request(`/galleries/${galleryId}/headshot-deliveries/ensure`, {
+        method: 'POST',
+        body: {
+          reference_number: payload.referenceNumber,
+          first_name: payload.firstName,
+          last_name: payload.lastName || '',
+          email: payload.email || null,
+          mobile: payload.mobile || null,
+          company: payload.company || null,
+          checkin_entry_id: payload.checkinEntryId || null,
+        },
+      });
+      if (!result.success) return { success: false, error: result.error };
+      return {
+        success: true,
+        conflict: !!result.data.conflict,
+        delivery: result.data.delivery,
+        headshotUrl: result.data.headshot_url,
+      };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  async listHeadshotDeliveries(galleryId) {
+    try {
+      const result = await this.request(`/galleries/${galleryId}/headshot-deliveries`);
+      return result.success
+        ? { success: true, deliveries: result.data }
+        : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
+  /** Real per-person delivery: Postmark email + SMS with their personal link. */
+  async sendHeadshotDelivery(galleryId, deliveryId, { sendEmail = true, sendSms = true } = {}) {
+    try {
+      const result = await this.request(`/galleries/${galleryId}/headshot-deliveries/${deliveryId}/send`, {
+        method: 'POST',
+        body: { send_email: sendEmail, send_sms: sendSms },
+      });
+      return result.success
+        ? { success: true, results: result.data.results }
+        : { success: false, error: result.error };
+    } catch (e) { return { success: false, error: e.message }; }
+  }
+
   /**
    * Delete a gallery photo by its exact filename (indexed lookup). Used to
    * REPLACE a re-rendered deliverable — the gallery's duplicate-filename guard

@@ -10,7 +10,7 @@ function registerIpc(ctx) {
     const win = parentWin();
     return win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
   };
-  const { app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater } = ctx;
+  const { app, settings, shoots, session, checkin, engine, watcher, gallery, usage, replicate, push, updater, deliveries } = ctx;
 
   const h = (channel, fn) => ipcMain.handle(channel, async (_e, ...args) => fn(...args));
 
@@ -204,7 +204,7 @@ function registerIpc(ctx) {
       defaultId: 0,
       cancelId: 0,
       message: `Delete ${person.firstName} ${person.lastName} (${person.shootNumber})?`,
-      detail: `Removes the subject and ${person.frames.length} frame record${person.frames.length === 1 ? '' : 's'} from the app. Photos on disk are NOT touched.`,
+      detail: `Removes the subject and ${person.frames.length} frame record${person.frames.length === 1 ? '' : 's'} from the app. Photos on disk are NOT touched${person.iq ? ', and their Turbo IQ headshot delivery stays (manage it in the gallery\u2019s Headshots panel)' : ''}.`,
     });
     if (response !== 1) return { ok: false, cancelled: true };
 
@@ -310,6 +310,32 @@ function registerIpc(ctx) {
     const person = shoots.getPerson(personId);
     if (!person?.email) return { ok: false, error: 'No email for this person' };
     const shoot = shoots.getShoot(person.shootId);
+
+    // Preferred: real per-person delivery (their own photos, their own link).
+    if (deliveries && shoot?.galleryId) {
+      const iq = person.iq?.deliveryId ? person.iq : await deliveries.ensureForPerson(personId);
+      if (iq?.deliveryId) {
+        const client = await gallery.ensureAuthed();
+        if (client) {
+          const list = await client.listHeadshotDeliveries(shoot.galleryId);
+          const d = list.success ? list.deliveries.find((x) => x.id === iq.deliveryId) : null;
+          if (d && (d.match_count ?? 0) === 0) {
+            return { ok: false, error: 'No photos matched yet — wait for renders to upload' };
+          }
+          const r = await client.sendHeadshotDelivery(shoot.galleryId, iq.deliveryId, {
+            sendEmail: true, sendSms: !!person.mobile,
+          });
+          if (r.success) {
+            shoots.updatePerson(personId, (p) => { p.delivery = { status: 'link-sent', sentAt: new Date().toISOString() }; });
+            push('people:changed', {});
+            return { ok: true, personal: true };
+          }
+          return { ok: false, error: r.error ?? 'Send failed' };
+        }
+      }
+    }
+
+    // Fallback: shared-gallery mail draft.
     const link = shoot?.galleryShareUrl;
     if (!link) return { ok: false, error: 'Shoot has no gallery link' };
     const subject = encodeURIComponent(`Your headshots — ${shoot.name}`);
@@ -318,23 +344,51 @@ function registerIpc(ctx) {
     await shell.openExternal(`mailto:${person.email}?subject=${subject}&body=${body}`);
     shoots.updatePerson(personId, (p) => { p.delivery = { status: 'link-sent', sentAt: new Date().toISOString() }; });
     push('people:changed', {});
-    return { ok: true };
+    return { ok: true, personal: false };
   });
   h('delivery:send-all', async (shootId) => {
-    const people = shoots.listPeople(shootId).filter((p) => p.delivery.status === 'not-sent' && p.email);
     const shoot = shoots.getShoot(shootId);
-    if (!shoot?.galleryShareUrl) return { ok: false, sent: 0 };
-    // One mail draft with everyone BCC'd — a single operator action.
-    const bcc = people.map((p) => p.email).join(',');
-    if (!bcc) return { ok: true, sent: 0 };
+    const pending = shoots.listPeople(shootId).filter((p) => p.delivery.status === 'not-sent' && p.email);
+    if (pending.length === 0) return { ok: true, sent: 0, waiting: 0 };
+
+    // Personal deliveries when the shoot has a gallery: probe match counts in
+    // ONE list call, send only people whose photos have landed.
+    if (deliveries && shoot?.galleryId) {
+      const client = await gallery.ensureAuthed();
+      if (client) {
+        for (const p of pending) {
+          if (!p.iq?.deliveryId) await deliveries.ensureForPerson(p.id).catch(() => {});
+        }
+        const list = await client.listHeadshotDeliveries(shoot.galleryId);
+        const byId = new Map((list.success ? list.deliveries : []).map((d) => [d.id, d]));
+        let sent = 0; let waiting = 0;
+        for (const p of shoots.listPeople(shootId).filter((x) => x.delivery.status === 'not-sent' && x.email)) {
+          const d = p.iq?.deliveryId ? byId.get(p.iq.deliveryId) : null;
+          if (!d || (d.match_count ?? 0) === 0) { waiting++; continue; }
+          const r = await client.sendHeadshotDelivery(shoot.galleryId, d.id, {
+            sendEmail: true, sendSms: !!p.mobile,
+          });
+          if (r.success) {
+            sent++;
+            shoots.updatePerson(p.id, (x) => { x.delivery = { status: 'link-sent', sentAt: new Date().toISOString() }; });
+          }
+        }
+        push('people:changed', {});
+        return { ok: true, sent, waiting };
+      }
+    }
+
+    // Fallback: one shared-gallery BCC draft.
+    if (!shoot?.galleryShareUrl) return { ok: false, sent: 0, waiting: 0 };
+    const bcc = pending.map((p) => p.email).join(',');
     const subject = encodeURIComponent(`Your headshots — ${shoot.name}`);
     const body = encodeURIComponent(`Hi,\n\nYour headshots are ready:\n${shoot.galleryShareUrl}\n\nThanks,\nTurbo 360`);
     await shell.openExternal(`mailto:?bcc=${bcc}&subject=${subject}&body=${body}`);
-    for (const p of people) {
+    for (const p of pending) {
       shoots.updatePerson(p.id, (x) => { x.delivery = { status: 'link-sent', sentAt: new Date().toISOString() }; });
     }
     push('people:changed', {});
-    return { ok: true, sent: people.length };
+    return { ok: true, sent: pending.length, waiting: 0 };
   });
 
   /* ---------- usage ---------- */

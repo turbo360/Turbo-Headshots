@@ -83,6 +83,9 @@ export interface Person {
   frames: Frame[];
   delivery: { status: DeliveryStatus; sentAt: string | null };
   createdAt: string;
+  checkinEntryId?: string | null;
+  /** Their Turbo IQ personal headshot delivery (set once ensured). */
+  iq?: { deliveryId: string; accessToken: string; headshotUrl: string } | null;
 }
 
 export type BatchStatus = 'held' | 'queued' | 'processing' | 'done' | 'partial' | 'failed';
@@ -276,8 +279,8 @@ export interface TurboApi {
   };
   delivery: {
     list(shootId: string): Promise<Person[]>;
-    sendLink(personId: string): Promise<{ ok: boolean; error?: string }>;
-    sendAll(shootId: string): Promise<{ ok: boolean; sent: number }>;
+    sendLink(personId: string): Promise<{ ok: boolean; personal?: boolean; error?: string }>;
+    sendAll(shootId: string): Promise<{ ok: boolean; sent: number; waiting?: number }>;
   };
   usage: {
     summary(): Promise<{ todayUsd: number; shootUsd: number }>;
