@@ -58,8 +58,9 @@ function buildHeadshotPrompt(backdrop, crop, keepGlasses, keepClothing = true, o
     `Framing: ${CROP_PROMPTS[crop]}. ` +
     'Lighting: soft, large key light from camera-left (~45°), gentle fill from camera-right, subtle rim light separating the subject from the backdrop. ' +
     'Skin: polished but natural — keep real skin texture, pores, and asymmetric expressions; do not smooth into plastic. ' +
-    'Eyes sharp and well-lit with a small natural catchlight. Mouth and jaw relaxed, professional but warm. ' +
-    'CRITICAL IDENTITY: keep the exact same person. Same face geometry, same age, same ethnicity, same hairstyle and colour, same facial hair (or lack thereof), same expression character. Do not slim, de-age, or change facial features. ' +
+    'Eyes sharp and well-lit with a small natural catchlight. ' +
+    "EXPRESSION IS COPIED, NOT INTERPRETED: reproduce the subject's exact expression from the input photo, in both directions. If the subject is smiling with teeth showing, output the very same open smile with the same teeth. If the lips are closed, keep them closed — do not part them or reveal teeth. If the expression is neutral, keep it neutral. Match the input's mouth openness and smile width exactly; never add, widen, reduce or remove a smile relative to the input. Keep the eyebrows and gaze as in the input. " +
+    'CRITICAL IDENTITY: keep the exact same person. Same face geometry, same age, same ethnicity, same hairstyle and colour, same facial hair (or lack thereof), same expression. Do not slim, de-age, or change facial features. ' +
     `${wardrobe}` +
     `${brandingRef}` +
     `${retryLine}` +

@@ -203,8 +203,20 @@ export default function Settings() {
               }}>Save & test</Button>
             </div>
             <div style={{ marginTop: 14 }}>
-              <SwitchRow title="Worker lanes: 4" desc="Drop to 3 if you hit sustained Replicate rate limits"
-                on={ai.workerCount === 4} onChange={(v) => patchAi({ workerCount: v ? 4 : 3 })} />
+              <div className="kicker" style={{ marginBottom: 8 }}>Worker lanes</div>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <button key={n} className={`pick-card${(ai.workerCount ?? 4) === n ? ' on' : ''}`}
+                    style={{ alignItems: 'center', textAlign: 'center' }}
+                    onClick={() => patchAi({ workerCount: n })}>
+                    <span style={{ fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-heading)' }}>{n}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+                Simultaneous renders. Applies from the next dispatch — no restart needed. Replicate
+                rate limits are handled automatically (busy lanes back off and retry).
+              </div>
             </div>
           </div>
           <div className="card">
