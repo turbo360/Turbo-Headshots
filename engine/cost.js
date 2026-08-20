@@ -1,15 +1,15 @@
 // Dispatch cost model — single source of truth for estimates.
-// Matches the v2 design prototype formula:
-//   perFrame = versions × (0.05 NBP + faceRestore·0.003 + keepClothing·0.001 guard
-//              + cutout·(birefnet ? 0.005 : 0.0005) + print8k·0.005)
+// Rates match engine/usage.js COST_USD (NBP 4K $0.24 official; time-billed
+// models measured live 2026-08-20). keepClothing = guard-in + guard-out
+// bg-remover calls; non-birefnet cutout reuses the guard-out matte for free.
 function estimate(fileCount, opts) {
   const versions = Math.max(1, (opts.backdrops || []).length);
   const perVersion =
-    0.05 +
+    0.24 +
     (opts.faceRestore ? 0.003 : 0) +
-    (opts.keepClothing ? 0.001 : 0) +
-    (opts.cutout ? (opts.matte === 'birefnet' ? 0.005 : 0.0005) : 0) +
-    (opts.print8k ? 0.005 : 0);
+    (opts.keepClothing ? 0.01 : 0) +
+    (opts.cutout && opts.matte === 'birefnet' ? 0.006 : 0) +
+    (opts.print8k ? 0.015 : 0);
   const perFrame = versions * perVersion;
   return {
     perFrame: Number(perFrame.toFixed(4)),
