@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore, detailShoot } from '../state/store';
 import { Badge, Button } from '../components/ds';
-import { batchStatusTone, deliveryLabel, fmtDate, optsSummary, usd } from '../meta';
+import { deliveryLabel, fmtDate, optsSummary } from '../meta';
 
 export default function ShootDetail() {
   const s = useStore();
@@ -13,7 +13,14 @@ export default function ShootDetail() {
   const people = s.detailPeople;
   const frames = people.reduce((n, p) => n + p.frames.length, 0);
   const deliveredCount = people.filter((p) => p.delivery.status === 'link-sent' || p.delivery.status === 'opened').length;
-  const shootBatches = s.batches.filter((b) => b.shootId === shoot.id);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const shownPeople = q
+    ? people.filter((p) =>
+        `${p.firstName} ${p.lastName}`.toLowerCase().includes(q)
+        || (p.shootNumber ?? '').toLowerCase().includes(q)
+        || (p.email ?? '').toLowerCase().includes(q))
+    : people;
 
   const reprocess = (personId: string | null, personName: string, files: string[], shootNumber = '') => {
     useStore.setState({
@@ -54,26 +61,32 @@ export default function ShootDetail() {
         </div>
       </div>
 
-      {shootBatches.length > 0 && (
-        <div className="card">
-          <div className="kicker" style={{ marginBottom: 12 }}>Batches</div>
-          <div className="row-list">
-            {shootBatches.map((b) => (
-              <div className="row-item" key={b.id} style={{ padding: '10px 14px' }}>
-                <span className="mono" style={{ fontSize: 12 }}>{b.shootNumber || '—'}</span>
-                <span style={{ fontWeight: 600 }}>{b.personName}</span>
-                <span className="muted" style={{ fontSize: 13, flex: 1 }}>{b.files.length} frames · {optsSummary(b.opts)}</span>
-                <span className="mono" style={{ fontSize: 13 }}>{usd(b.estimateUsd)}</span>
-                <Badge tone={batchStatusTone(b.status)}>{b.status}</Badge>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px' }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search people — name, number or email…"
+          style={{
+            flex: 1, minWidth: 200, background: 'var(--admin-surface)',
+            border: '1px solid var(--admin-border)', borderRadius: 8,
+            padding: '9px 12px', fontSize: 14, fontFamily: 'var(--font-body)',
+          }}
+        />
+        {query && <Button size="sm" variant="ghost" onClick={() => setQuery('')}>Clear</Button>}
+        <Button size="sm" variant="primary" onClick={async () => {
+          // Register a new subject on this shoot: activate it and jump to
+          // Capture, where the registration form lives.
+          await window.turbo.shoots.setActive(shoot.id);
+          s.go('capture');
+        }}>Add person</Button>
+      </div>
 
       <div className="row-list">
         {people.length === 0 && <div className="card muted">No people checked in on this shoot yet.</div>}
-        {people.map((p) => {
+        {people.length > 0 && shownPeople.length === 0 && (
+          <div className="card muted">No one matches “{query}”.</div>
+        )}
+        {shownPeople.map((p) => {
           const picks = p.frames.filter((f) => f.approved).length;
           const del = deliveryLabel(p.delivery.status);
           return (
