@@ -2,15 +2,17 @@
 const fs = require('fs');
 const path = require('path');
 
-// NBP is Google's official per-image price for 4K output ($0.134 at 1K/2K).
-// The time-billed models are averages measured from live 2026-08-20 predictions
-// (predict_time × GPU rate): esrgan ~15s, birefnet ~6.3s, bg-remover ~5s.
+// Rates derived from the actual Replicate August 2026 invoice (invoice $ /
+// app-logged run counts) + the model's published price card: NBP 4K is $0.30
+// per output image ON REPLICATE (1K/2K $0.15) — higher than Google's direct
+// API. Beware: timed-out NBP predictions still bill; they never reach this
+// ledger, so the real account spend runs slightly above the app's figure.
 const COST_USD = {
-  'google/nano-banana-pro': 0.24,
-  'sczhou/codeformer': 0.003,
-  '851-labs/background-remover': 0.005,
-  'men1scus/birefnet': 0.006,
-  'nightmareai/real-esrgan': 0.015,
+  'google/nano-banana-pro': 0.30,
+  'sczhou/codeformer': 0.012,
+  '851-labs/background-remover': 0.002,
+  'men1scus/birefnet': 0.009,
+  'nightmareai/real-esrgan': 0.002,
 };
 
 class Usage {
