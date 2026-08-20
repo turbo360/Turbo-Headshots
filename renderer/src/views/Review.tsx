@@ -10,8 +10,9 @@ export default function Review() {
   const pool = s.reviewPersonId
     ? [...s.people, ...s.detailPeople].find((p) => p.id === s.reviewPersonId) ?? null
     : null;
-  // Fall back to most recent person with frames on the active shoot.
-  const person = pool ?? [...s.people].reverse().find((p) => p.frames.length > 0) ?? null;
+  // Fall back to most recent person still needing review — a person whose
+  // batch was already dispatched has all frames marked reviewed and drops out.
+  const person = pool ?? [...s.people].reverse().find((p) => p.frames.some((f) => !f.reviewed)) ?? null;
 
   const approvedCount = person ? person.frames.filter((f) => f.approved).length : 0;
   const [est, setEst] = useState<{ perFrame: number; total: number }>({ perFrame: 0, total: 0 });

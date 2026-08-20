@@ -43,7 +43,7 @@ export default function App() {
   const s = useStore();
   const shoot = activeShoot(s);
   const inFlight = s.processing?.processing ?? 0;
-  const reviewCount = s.people.reduce((n, p) => n + p.frames.filter((f) => !f.approved).length, 0);
+  const reviewCount = s.people.reduce((n, p) => n + p.frames.filter((f) => !f.approved && !f.reviewed).length, 0);
 
   const nav: { key: ViewId; label: string; icon: string[]; badge: string | null }[] = [
     { key: 'shoots', label: 'Shoots', icon: ICONS.shoots, badge: null },

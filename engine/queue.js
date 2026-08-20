@@ -91,6 +91,14 @@ class Engine {
       totalRenders: 0,
     };
     this.batches.update((list) => list.push(batch));
+    // Review handled: every frame on screen at dispatch time was either
+    // approved (sent) or culled — only frames captured AFTER this moment
+    // should count as awaiting review again.
+    if (personId) {
+      this.d.shoots.updatePerson(personId, (p) => {
+        for (const f of p.frames) f.reviewed = true;
+      });
+    }
     if (!hold) this.startBatch(batch.id);
     this.notifyBatches();
     return batch;

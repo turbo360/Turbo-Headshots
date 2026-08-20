@@ -64,6 +64,8 @@ export interface Frame {
   baseName: string;      // {shootNumber}_{Last}_{First}_{NN}
   capturedAt: string;
   approved: boolean;
+  /** Set when a batch was dispatched for this person — frame no longer awaits review. */
+  reviewed?: boolean;
   quality: FrameQuality | null;
   flags: string[];       // fail-soft flags from processing
 }

@@ -218,6 +218,19 @@ app.whenReady().then(() => {
       settings.patch({ shootFaceRestoreMigrated: true });
     }
   });
+  boot('reviewedFlag migration', () => {
+    // One-time: people dispatched before frame.reviewed existed kept their
+    // culled frames in the Review badge forever.
+    if (!settings.raw.reviewedFlagMigrated) {
+      const dispatched = new Set(engine.batches.data.map((b) => b.personId).filter(Boolean));
+      shoots.people.update((list) => {
+        for (const p of list) {
+          if (dispatched.has(p.id)) for (const f of p.frames) f.reviewed = true;
+        }
+      });
+      settings.patch({ reviewedFlagMigrated: true });
+    }
+  });
   boot('importLegacyFolders', () => shoots.importLegacyFolders());
   boot('watcher', () => watcher.start());
   boot('checkin', () => checkin.start());
