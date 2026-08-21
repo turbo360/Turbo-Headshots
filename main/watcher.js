@@ -63,14 +63,30 @@ class Watcher {
       if (!st.active || !st.startedAt) return;
       const person = this.deps.session.personId
         ? this.deps.session.shoots.getPerson(this.deps.session.personId) : null;
-      const lastFrameAt = person?.frames.length
+      // Floor at the SESSION start, never just the last frame: a re-opened
+      // subject ("Continue shooting") has a days-old last frame, and without
+      // this floor every watch-root file captured since then — the entire
+      // shoot — gets ingested as theirs and auto-dispatched (2026-08-22
+      // incident: 350 duplicate frames + 350 billed renders queued).
+      const sessionStart = new Date(st.startedAt).getTime();
+      const lastFrame = person?.frames.length
         ? new Date(person.frames[person.frames.length - 1].capturedAt).getTime()
-        : new Date(st.startedAt).getTime();
+        : 0;
+      const lastFrameAt = Math.max(sessionStart, lastFrame);
       const candidates = fs.readdirSync(folder)
         .filter((f) => !f.startsWith('.') && IMAGE_EXTS.includes(path.extname(f).toLowerCase()))
         .map((f) => ({ f, mtime: fs.statSync(path.join(folder, f)).mtimeMs }))
         .filter((x) => x.mtime > lastFrameAt)
         .sort((a, b) => a.mtime - b.mtime);
+      // Belt-and-braces: a genuine mid-shoot crash leaves a handful of
+      // unrouted frames, never a flood. Refuse to bulk-ingest.
+      if (candidates.length > 30) {
+        this.deps.push('processing-log', {
+          message: `Watcher: found ${candidates.length} unrouted files at startup — too many to auto-route safely, skipping recovery (use Reprocess on the subject if frames are genuinely missing)`,
+          type: 'warning',
+        });
+        return;
+      }
       for (const { f } of candidates) {
         try { this.onAdd(path.join(folder, f), folder); } catch (err) {
           console.error('[watcher] reconcile item failed:', err.message);
