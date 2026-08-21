@@ -70,7 +70,7 @@ class ShootsStore {
       status: 'live',
       folderPath,
       defaults: defaults ?? this.settings.raw.defaultDispatchOpts,
-      engineMode: engineMode === 'local' ? 'local' : 'replicate',
+      engineMode: ['local', 'composite'].includes(engineMode) ? engineMode : 'replicate',
       createdAt: nowIso(),
     };
     this.shoots.update((list) => list.push(shoot));

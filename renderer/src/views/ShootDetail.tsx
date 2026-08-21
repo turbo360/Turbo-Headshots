@@ -33,7 +33,7 @@ export default function ShootDetail() {
     <div className="page">
       <div className="card carbon" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end' }}>
         <div style={{ flex: 2, minWidth: 280 }}>
-          <div className="kicker">{fmtDate(shoot.date || shoot.createdAt)}{shoot.location ? ` · ${shoot.location.toUpperCase()}` : ''}{shoot.engineMode === 'local' ? ' · LOCAL PIPELINE' : ''}</div>
+          <div className="kicker">{fmtDate(shoot.date || shoot.createdAt)}{shoot.location ? ` · ${shoot.location.toUpperCase()}` : ''}{shoot.engineMode === 'local' ? ' · HYBRID LOCAL' : shoot.engineMode === 'composite' ? ' · FULLY LOCAL' : ''}</div>
           <div className="h-display" style={{ fontSize: 30, margin: '8px 0 10px' }}>{shoot.name}</div>
           <div style={{ fontSize: 14, color: '#B9B6AF' }}>{optsSummary(shoot.defaults)}</div>
         </div>

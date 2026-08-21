@@ -4,6 +4,8 @@
 // guard-in + guard-out bg-remover calls; non-birefnet cutout reuses the
 // guard-out matte for free.
 function estimate(fileCount, opts) {
+  // Fully Local (composite) never touches Replicate.
+  if (opts.engine === 'composite') return { perFrame: 0, total: 0 };
   const versions = Math.max(1, (opts.backdrops || []).length);
   // Local engine: masks run on this Mac — only NBP (and print upscale) bill.
   const localMasks = opts.engine === 'local';

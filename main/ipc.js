@@ -242,6 +242,14 @@ function registerIpc(ctx) {
   h('checkin:claim-entry', (entryId) => checkin.claim(entryId));
 
   /* ---------- review ---------- */
+  h('birefnet:status', () => require('../engine/birefnetInstall').status(app.getPath('userData')));
+  h('birefnet:install', async () => {
+    const result = await require('../engine/birefnetInstall')
+      .install(app.getPath('userData'), (line) => push('birefnet:progress', { line }));
+    if (result.ok) require('../engine/birefnetLocal').init(app.getPath('userData'));
+    return result;
+  });
+
   h('review:set-approved', (personId, baseName, approved) => {
     shoots.setApproved(personId, baseName, approved);
     push('people:changed', {});

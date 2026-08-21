@@ -322,6 +322,127 @@ async function processRender(item, deps, frameCache) {
   return { outputs, flags, verify };
 }
 
+/* ---------- Fully Local (composite) pipeline ---------- */
+
+// Procedural studio backdrops matching the NBP prompt palette. Deterministic
+// gradients: every subject in a shoot gets EXACTLY the same backdrop.
+const COMPOSITE_BACKDROPS = {
+  grey: { center: '#7e8184', edge: '#63666a' },
+  white: { center: '#f5f5f3', edge: '#e0e0dd' },
+  navy: { center: '#24364d', edge: '#141f31' },
+  turbo: { center: '#2b2725', edge: '#131110' },
+};
+
+function backdropSvg(w, h, c) {
+  return Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
+    `<defs><radialGradient id="g" cx="50%" cy="38%" r="80%">` +
+    `<stop offset="0%" stop-color="${c.center}"/>` +
+    `<stop offset="100%" stop-color="${c.edge}"/>` +
+    `</radialGradient></defs>` +
+    `<rect width="100%" height="100%" fill="url(#g)"/></svg>`
+  );
+}
+
+/**
+ * Fully Local: no generative re-render. The subject's real pixels are colour
+ * corrected, matted (local BiRefNet or Vision), and composited onto a
+ * procedural studio backdrop. Zero identity/expression/branding risk, $0.
+ */
+async function processComposite(item, deps, frameCache) {
+  const { frame, personFolder, baseName, backdrop, opts } = item;
+  const { sidecar, settings, onStage } = deps;
+  const flags = ['composite'];
+  const slug = backdrop;
+  const processedDir = path.join(personFolder, 'Processed');
+  fs.mkdirSync(processedDir, { recursive: true });
+
+  /* ---- prepare + correct (cached per frame across backdrops) ---- */
+  onStage('prepare', '01 Prepare · colour correct', 10);
+  let prepPromise = frameCache.get('compositePrep');
+  if (!prepPromise) {
+    prepPromise = (async () => {
+      const workingPath = await local.resolveWorkingImage(frame, personFolder, settings.raw.watchFolder);
+      if (!workingPath) throw new Error('No JPEG available and RAW conversion failed');
+      const oriented = await sharp(fs.readFileSync(workingPath)).rotate().jpeg({ quality: 98 }).toBuffer();
+      const tmp = path.join(os.tmpdir(), `th-comp-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`);
+      fs.writeFileSync(tmp, oriented);
+      let faceData; let wbMatrix;
+      try {
+        faceData = await local.detectFace(sidecar, tmp);
+        wbMatrix = await local.calculateWhiteBalance(tmp);
+      } finally {
+        try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+      }
+      const wbStrength = settings.raw.whiteBalanceStrength ?? 1.0;
+      const matrix = wbMatrix.map((row, i) => row.map((v, j) => {
+        const identity = i === j ? 1 : 0;
+        return identity + (v - identity) * wbStrength;
+      }));
+      const corrected = await sharp(oriented)
+        .recomb(matrix)
+        .modulate({ saturation: 1.05, brightness: settings.raw.brightness ?? 1.12 })
+        .sharpen({ sigma: settings.raw.sharpening ?? 0.8, m1: 0.5, m2: 0.5 })
+        .jpeg({ quality: 98 }).toBuffer();
+
+      /* ---- matte the corrected frame (BiRefNet local → Vision) ---- */
+      onStage('guardOut', '02 Matte · local BiRefNet / Vision', 35);
+      const cutoutPng = await localCutout(corrected, null, false, sidecar, flags);
+      const meta = await sharp(corrected).metadata();
+      return { corrected, cutoutPng, faceData, width: meta.width ?? 0, height: meta.height ?? 0 };
+    })();
+    frameCache.set('compositePrep', prepPromise);
+    prepPromise.catch(() => frameCache.delete('compositePrep'));
+  }
+  const prep = await prepPromise;
+
+  /* ---- composite onto the procedural backdrop ---- */
+  onStage('export', '03 Composite + export', 65);
+  const bg = COMPOSITE_BACKDROPS[backdrop] ?? COMPOSITE_BACKDROPS.grey;
+  if (!COMPOSITE_BACKDROPS[backdrop]) flags.push(`backdropFallback:${backdrop}`);
+  const renderBuf = await sharp(backdropSvg(prep.width, prep.height, bg))
+    .composite([{ input: prep.cutoutPng }])
+    .jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toBuffer();
+
+  const outputs = [];
+  const fullPath = path.join(processedDir, `${baseName}-${slug}-full.jpg`);
+  fs.writeFileSync(fullPath, renderBuf);
+  outputs.push({ path: fullPath, kind: 'full', backdrop: slug });
+
+  const rW = prep.width;
+  const rH = prep.height;
+  const cropRects = {};
+  const exportCrop = async (ratio, kindJpg, suffix) => {
+    const rect = aspectTrim(prep.faceData, rW, rH, ratio);
+    cropRects[suffix] = rect;
+    const jpgPath = path.join(processedDir, `${baseName}-${slug}-${suffix}.jpg`);
+    await sharp(renderBuf).extract(rect)
+      .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+      .toFile(jpgPath);
+    outputs.push({ path: jpgPath, kind: kindJpg, backdrop: slug });
+  };
+  if (opts.portrait) await exportCrop(4 / 5, '4x5', '4x5');
+  if (opts.square) await exportCrop(1, 'sqr', 'SQR');
+
+  if (opts.cutout) {
+    if (opts.portrait) {
+      const p = path.join(processedDir, `${baseName}-${slug}-4x5-TP.png`);
+      const c = cropRects['4x5'] ?? aspectTrim(prep.faceData, rW, rH, 4 / 5);
+      await sharp(prep.cutoutPng).extract(c).png().toFile(p);
+      outputs.push({ path: p, kind: '4x5-tp', backdrop: slug });
+    }
+    if (opts.square) {
+      const p = path.join(processedDir, `${baseName}-${slug}-SQR-TP.png`);
+      const c = cropRects['SQR'] ?? aspectTrim(prep.faceData, rW, rH, 1);
+      await sharp(prep.cutoutPng).extract(c).png().toFile(p);
+      outputs.push({ path: p, kind: 'sqr-tp', backdrop: slug });
+    }
+  }
+  // print8k is a generative-pipeline concern (ESRGAN) — not applicable here.
+
+  return { outputs, flags, verify: null };
+}
+
 /**
  * Local-only fallback render (no Replicate): v1-style crop + colour correction.
  * Outputs carry no backdrop slug (original backdrop preserved).
@@ -395,4 +516,4 @@ async function processLocal(item, deps, frameCache) {
   return { outputs, flags, verify: null };
 }
 
-module.exports = { processRender, processLocal, STAGES, nearestAspect };
+module.exports = { processRender, processLocal, processComposite, STAGES, nearestAspect };

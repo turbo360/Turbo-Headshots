@@ -1,0 +1,123 @@
+// In-app installer for the optional local BiRefNet runtime.
+//
+// The app ships with zero Python — this module can build the runtime on any
+// Mac: find a python3 (>=3.10), create userData/birefnet/venv, pip install
+// torch + transformers, and write the embedded worker script. Progress is
+// streamed to the renderer so Settings can show a live install log.
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Kept in lockstep with engine/birefnetLocal.js protocol: strict one JSON
+// request line -> one JSON reply line; no banner output.
+const INFER_SCRIPT = `#!/usr/bin/env python3
+"""Persistent BiRefNet matting worker for Turbo Headshots (local pipeline)."""
+import sys, json
+import torch
+from PIL import Image
+from torchvision import transforms
+from transformers import AutoModelForImageSegmentation
+
+device = 'mps' if torch.backends.mps.is_available() else 'cpu'
+model = AutoModelForImageSegmentation.from_pretrained('ZhengPeng7/BiRefNet', trust_remote_code=True)
+model.to(device).eval()
+if device == 'mps':
+    model.half()
+
+tf = transforms.Compose([
+    transforms.Resize((1024, 1024)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+])
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+        im = Image.open(req['in']).convert('RGB')
+        w, h = im.size
+        x = tf(im).unsqueeze(0).to(device)
+        if device == 'mps':
+            x = x.half()
+        with torch.no_grad():
+            pred = model(x)[-1].sigmoid().float().cpu()
+        mask = transforms.ToPILImage()(pred[0].squeeze()).resize((w, h), Image.BILINEAR)
+        out = im.convert('RGBA')
+        out.putalpha(mask)
+        out.save(req['out'])
+        print(json.dumps({'ok': True}), flush=True)
+    except Exception as e:
+        print(json.dumps({'ok': False, 'error': str(e)}), flush=True)
+`;
+
+const PY_CANDIDATES = ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3'];
+
+function findPython() {
+  for (const py of PY_CANDIDATES) {
+    if (!fs.existsSync(py)) continue;
+    try {
+      const out = require('child_process').execFileSync(py, ['-c', 'import sys; print(sys.version_info[0]*100+sys.version_info[1])']);
+      if (parseInt(String(out).trim(), 10) >= 310) return py;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+function runtimeDir(userDataDir) { return path.join(userDataDir, 'birefnet'); }
+
+function status(userDataDir) {
+  const dir = runtimeDir(userDataDir);
+  const installed = fs.existsSync(path.join(dir, 'venv', 'bin', 'python3'))
+    && fs.existsSync(path.join(dir, 'birefnet_infer.py'));
+  return { installed, python: findPython(), installing: !!currentInstall };
+}
+
+let currentInstall = null;
+
+/**
+ * Build the runtime. onProgress(line) streams human-readable steps.
+ * Resolves { ok: true } or { ok: false, error }.
+ */
+async function install(userDataDir, onProgress) {
+  if (currentInstall) return { ok: false, error: 'Install already running' };
+  const dir = runtimeDir(userDataDir);
+  const py = findPython();
+  if (!py) {
+    return {
+      ok: false,
+      error: 'No Python 3.10+ found. Install Homebrew (brew.sh), then `brew install python`, and try again.',
+    };
+  }
+  const step = (msg) => { try { onProgress(msg); } catch { /* ignore */ } };
+  const sh = (cmd, args) => new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    p.stdout.on('data', (d) => step(String(d).trim()));
+    p.stderr.on('data', (d) => step(String(d).trim()));
+    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${path.basename(cmd)} exited ${code}`))));
+    p.on('error', reject);
+  });
+
+  currentInstall = (async () => {
+    fs.mkdirSync(dir, { recursive: true });
+    step(`Using ${py}`);
+    step('Creating Python environment…');
+    await sh(py, ['-m', 'venv', path.join(dir, 'venv')]);
+    const pip = path.join(dir, 'venv', 'bin', 'pip');
+    step('Downloading PyTorch + BiRefNet dependencies (~2 GB — a few minutes)…');
+    await sh(pip, ['install', '--quiet', '--upgrade', 'pip']);
+    await sh(pip, ['install', '--quiet', 'torch', 'torchvision', 'transformers', 'timm', 'einops', 'kornia', 'pillow']);
+    fs.writeFileSync(path.join(dir, 'birefnet_infer.py'), INFER_SCRIPT);
+    step('Verifying…');
+    await sh(path.join(dir, 'venv', 'bin', 'python3'), ['-c', 'import torch, transformers, timm']);
+    step('Done — the model weights (~900 MB) download automatically on first use.');
+    return { ok: true };
+  })().catch((err) => ({ ok: false, error: err.message }));
+
+  const result = await currentInstall;
+  currentInstall = null;
+  return result;
+}
+
+module.exports = { status, install, INFER_SCRIPT };

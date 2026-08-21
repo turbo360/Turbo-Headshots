@@ -8,7 +8,7 @@ export type BackdropId =
 export type FramingId = 'chest-up' | 'shoulders-up' | 'head-tight' | 'original';
 export type MatteId = 'inspyrenet' | 'birefnet';
 
-export type EngineMode = 'replicate' | 'local';
+export type EngineMode = 'replicate' | 'local' | 'composite';
 
 export interface DispatchOpts {
   /** Resolved per shoot at dispatch/run time; 'local' = masks on this Mac. */
@@ -209,7 +209,13 @@ export type ViewId =
 
 /* ---------- window.turbo (preload) ---------- */
 
+export interface LocalAiStatus { installed: boolean; python: string | null; installing: boolean }
+
 export interface TurboApi {
+  localai: {
+    status(): Promise<LocalAiStatus>;
+    install(): Promise<{ ok: boolean; error?: string }>;
+  };
   app: {
     getVersion(): Promise<string>;
     checkForUpdates(): Promise<void>;

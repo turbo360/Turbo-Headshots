@@ -1,7 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore, activeShoot } from '../state/store';
 import { Button, Input, SwitchRow } from '../components/ds';
-import type { AiSettings, DispatchOpts } from '../types';
+import type { AiSettings, DispatchOpts, LocalAiStatus } from '../types';
+
+function LocalAiRuntime() {
+  const s = useStore();
+  const [st, setSt] = useState<LocalAiStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState('');
+  useEffect(() => { void window.turbo.localai.status().then(setSt); }, []);
+  useEffect(() => window.turbo.on('birefnet:progress', (p) => {
+    setLog((p as { line: string }).line);
+  }), []);
+  if (!st) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="kicker" style={{ marginBottom: 8 }}>Local AI runtime</div>
+      <div className="muted" style={{ fontSize: 13.5, marginBottom: st.installed ? 0 : 8 }}>
+        {st.installed
+          ? 'BiRefNet installed ✓ — Hybrid/Fully Local shoots cut mattes with studio-grade hair edges on this Mac.'
+          : 'Not installed — local shoots use the built-in Apple Vision mask (slightly softer hair edges). One-click install builds a private Python runtime (~2 GB download).'}
+      </div>
+      {!st.installed && (
+        <Button size="sm" variant="secondary" disabled={busy || st.installing} onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await window.turbo.localai.install();
+            s.showToast(r.ok ? 'Local BiRefNet installed' : `Install failed: ${r.error}`, r.ok ? 'success' : 'error');
+            setSt(await window.turbo.localai.status());
+          } finally { setBusy(false); }
+        }}>{busy || st.installing ? 'Installing…' : 'Install local BiRefNet'}</Button>
+      )}
+      {(busy || st.installing) && log && (
+        <div className="mono muted" style={{ fontSize: 11.5, marginTop: 8, whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{log}</div>
+      )}
+    </div>
+  );
+}
 
 const TABS = ['Look & engine', 'Output files', 'Folders & naming', 'Integrations'];
 
@@ -218,6 +253,7 @@ export default function Settings() {
                 rate limits are handled automatically (busy lanes back off and retry).
               </div>
             </div>
+            <LocalAiRuntime />
           </div>
           <div className="card">
             <div className="kicker" style={{ marginBottom: 12 }}>Check-in kiosk</div>

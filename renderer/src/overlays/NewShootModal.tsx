@@ -10,7 +10,7 @@ export default function NewShootModal() {
     galleryMode: 'create' as 'create' | 'link',
     galleryName: '', galleryId: '',
     autoUpload: true,
-    engineMode: 'replicate' as 'replicate' | 'local',
+    engineMode: 'replicate' as 'replicate' | 'local' | 'composite',
   });
   const [busy, setBusy] = useState(false);
 
@@ -68,8 +68,18 @@ export default function NewShootModal() {
         <div className="kicker" style={{ margin: '20px 0 10px' }}>Processing pipeline</div>
         <div style={{ display: 'flex', gap: 10 }}>
           {([
-            { id: 'replicate' as const, label: 'Replicate', desc: 'All AI stages in the cloud — the proven pipeline.' },
-            { id: 'local' as const, label: 'Local', desc: 'Masks & cutouts on this Mac; only the Nano Banana render (and 8K print) bill.' },
+            {
+              id: 'replicate' as const, label: 'Replicate',
+              desc: 'Everything in the cloud. Nano Banana studio re-light + re-stage, cloud masks & cutouts. Highest polish — rescues rough capture lighting. ~$0.31 per render.',
+            },
+            {
+              id: 'local' as const, label: 'Hybrid Local',
+              desc: 'Nano Banana re-light in the cloud; masks & cutouts run on this Mac. Same premium look, faster per render. ~$0.30 per render.',
+            },
+            {
+              id: 'composite' as const, label: 'Fully Local',
+              desc: 'No AI re-render — your real pixels, colour corrected and composited onto a clean studio backdrop. Instant, free, zero identity risk. Needs good capture lighting.',
+            },
           ]).map((m) => (
             <button key={m.id} className={`pick-card${form.engineMode === m.id ? ' on' : ''}`}
               style={{ flex: 1, padding: form.engineMode === m.id ? 11 : 12 }}

@@ -4,7 +4,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const { JsonStore } = require('../main/store');
-const { processRender, processLocal } = require('./pipeline');
+const { processRender, processLocal, processComposite } = require('./pipeline');
 const { estimate } = require('./cost');
 
 const uid = () => crypto.randomUUID();
@@ -138,7 +138,10 @@ class Engine {
     // Idempotent: a queued batch already has its items — starting it again
     // must never enqueue (and bill) the whole set a second time.
     if (this.queue.data.some((i) => i.batchId === id)) { this.pump(); return; }
-    const engineOn = this.engineAvailable();
+    // Composite shoots keep their backdrops even with no Replicate key —
+    // that pipeline never touches the cloud.
+    const engineOn = this.engineAvailable()
+      || this.d.shoots.getShoot(batch.shootId)?.engineMode === 'composite';
     const backdrops = engineOn ? batch.opts.backdrops : [null];
     const items = [];
     for (const baseName of batch.files) {
@@ -305,7 +308,9 @@ class Engine {
 
     try {
       let result;
-      if (item.backdrop === null || !this.engineAvailable()) {
+      if (opts.engine === 'composite' && item.backdrop !== null) {
+        result = await processComposite(workItem, deps, cache);
+      } else if (item.backdrop === null || !this.engineAvailable()) {
         result = await processLocal(workItem, deps, cache);
       } else {
         result = await processRender(workItem, deps, cache);

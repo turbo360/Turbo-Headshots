@@ -17,6 +17,7 @@ const PUSH_CHANNELS = new Set([
   'shoots:changed',
   'people:changed',
   'batches:changed',
+  'birefnet:progress',
 ]);
 
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
@@ -28,6 +29,10 @@ contextBridge.exposeInMainWorld('turbo', {
     downloadUpdate: invoke('download-update'),
     installUpdate: invoke('install-update'),
     openFolder: invoke('open-folder'),
+  },
+  localai: {
+    status: invoke('birefnet:status'),
+    install: invoke('birefnet:install'),
   },
   settings: {
     get: invoke('get-settings'),
