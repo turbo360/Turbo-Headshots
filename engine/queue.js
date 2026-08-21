@@ -287,7 +287,12 @@ class Engine {
     }
 
     const batch = this.batches.data.find((b) => b.id === item.batchId);
-    const opts = batch?.opts ?? this.d.settings.raw.defaultDispatchOpts;
+    // Per-shoot pipeline: 'local' runs the guard/cutout masks on this Mac
+    // (Vision sidecar + optional BiRefNet worker); NBP always stays remote.
+    const opts = {
+      ...(batch?.opts ?? this.d.settings.raw.defaultDispatchOpts),
+      engine: this.d.shoots.getShoot(item.shootId)?.engineMode ?? 'replicate',
+    };
     const deps = {
       client: this.d.client,
       sidecar: this.d.sidecar(),

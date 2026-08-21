@@ -160,6 +160,7 @@ function registerIpc(ctx) {
       }
       const shoot = shoots.createShoot({
         name: data.name, client: data.client, date: data.date, location: data.location,
+        engineMode: data.engineMode,
         galleryId: server?.galleryId ?? null,
         galleryName,
         checkinSlug: server?.shoot?.checkin_slug ?? null,

@@ -25,7 +25,7 @@ export default function ShootDetail() {
   const reprocess = (personId: string | null, personName: string, files: string[], shootNumber = '') => {
     useStore.setState({
       dispatchTarget: { shootId: shoot.id, personId, personName, files },
-      dispatchOpts: shoot.defaults,
+      dispatchOpts: { ...shoot.defaults, engine: shoot.engineMode ?? 'replicate' },
     });
   };
 
@@ -33,7 +33,7 @@ export default function ShootDetail() {
     <div className="page">
       <div className="card carbon" style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-end' }}>
         <div style={{ flex: 2, minWidth: 280 }}>
-          <div className="kicker">{fmtDate(shoot.date || shoot.createdAt)}{shoot.location ? ` · ${shoot.location.toUpperCase()}` : ''}</div>
+          <div className="kicker">{fmtDate(shoot.date || shoot.createdAt)}{shoot.location ? ` · ${shoot.location.toUpperCase()}` : ''}{shoot.engineMode === 'local' ? ' · LOCAL PIPELINE' : ''}</div>
           <div className="h-display" style={{ fontSize: 30, margin: '8px 0 10px' }}>{shoot.name}</div>
           <div style={{ fontSize: 14, color: '#B9B6AF' }}>{optsSummary(shoot.defaults)}</div>
         </div>

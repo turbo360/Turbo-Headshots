@@ -8,7 +8,30 @@ const sharp = require('sharp');
 const { buildHeadshotPrompt } = require('./prompts');
 const guard = require('./brandingGuard');
 const local = require('./localPipeline');
+const birefnetLocal = require('./birefnetLocal');
 const { upscaleToPrint } = require('./upscale');
+
+/** Local-engine cutout: BiRefNet worker when installed (Replicate-parity hair
+    edges), else reuse the guard-out mask, else a fresh Vision mask. */
+async function localCutout(renderBuf, outAlpha, locked, sidecar, flags) {
+  if (birefnetLocal.available()) {
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const tmpIn = path.join(os.tmpdir(), `th-matte-${stamp}.jpg`);
+    const tmpOut = path.join(os.tmpdir(), `th-matte-${stamp}.png`);
+    fs.writeFileSync(tmpIn, renderBuf);
+    try {
+      await birefnetLocal.matte(tmpIn, tmpOut);
+      return fs.readFileSync(tmpOut);
+    } catch (err) {
+      console.error('[engine] local birefnet failed, using Vision mask:', err.message);
+      flags.push('birefnetLocalFailed');
+    } finally {
+      for (const f of [tmpIn, tmpOut]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+    }
+  }
+  if (outAlpha && !locked) return outAlpha.png;
+  return (await guard.personAlphaLocal(sidecar, renderBuf)).png;
+}
 
 // Nano Banana's match_input_image drifts the canvas (a 3:4 input came back
 // ≈2:3 live), sinking the pixel-lock geometry gate — pin the nearest concrete
@@ -112,8 +135,10 @@ async function processRender(item, deps, frameCache) {
     let guardPromise = frameCache.get('guardIn');
     if (!guardPromise) {
       guardPromise = (async () => {
-        const alpha = await guard.personAlpha(client, toDataUri(prep.buffer));
-        usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: alpha.predictionId });
+        const alpha = opts.engine === 'local'
+          ? await guard.personAlphaLocal(sidecar, prep.buffer)
+          : await guard.personAlpha(client, toDataUri(prep.buffer));
+        if (alpha.predictionId) usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: alpha.predictionId });
         const torso = guard.torsoRegion(alpha.bbox, prep.width, prep.height);
         const torsoBuf = await guard.cropRegion(prep.buffer, torso);
         return { inputAlpha: alpha, inputTorsoBuf: torsoBuf, torsoDataUri: toDataUri(torsoBuf) };
@@ -168,8 +193,10 @@ async function processRender(item, deps, frameCache) {
   if (opts.keepClothing && inputAlpha && inputTorsoBuf) {
     onStage('guardOut', STAGES.guardOut, 70);
     try {
-      outAlpha = await guard.personAlpha(client, toDataUri(renderBuf));
-      usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: outAlpha.predictionId });
+      outAlpha = opts.engine === 'local'
+        ? await guard.personAlphaLocal(sidecar, renderBuf)
+        : await guard.personAlpha(client, toDataUri(renderBuf));
+      if (outAlpha.predictionId) usage.record({ tool: 'headshot-guard', model: '851-labs/background-remover', predictionId: outAlpha.predictionId });
       const outMeta = await sharp(renderBuf).metadata();
       const outW = outMeta.width ?? outAlpha.width;
       const outH = outMeta.height ?? outAlpha.height;
@@ -243,7 +270,9 @@ async function processRender(item, deps, frameCache) {
     try {
       let cutoutPng;
       const locked = flags.includes('pixelLocked');
-      if (opts.matte === 'birefnet') {
+      if (opts.engine === 'local') {
+        cutoutPng = await localCutout(renderBuf, outAlpha, locked, sidecar, flags);
+      } else if (opts.matte === 'birefnet') {
         const meta = await sharp(renderBuf).metadata();
         const bi = await client.runBirefnet(toDataUri(renderBuf), `${meta.width}x${meta.height}`);
         usage.record({ tool: 'cutout', model: 'men1scus/birefnet', predictionId: bi.predictionId });

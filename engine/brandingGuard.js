@@ -54,6 +54,26 @@ async function personAlpha(client, imageDataUri) {
   return { png, bbox, width, height, predictionId: result.predictionId };
 }
 
+/** Same contract as personAlpha, but fully local: the sidecar's Apple Vision
+    foreground mask produces the transparent PNG — no Replicate call, no cost. */
+async function personAlphaLocal(sidecar, imageBuffer) {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const tmpIn = path.join(os.tmpdir(), `th-alpha-${stamp}.jpg`);
+  const tmpOut = path.join(os.tmpdir(), `th-alpha-${stamp}.png`);
+  fs.writeFileSync(tmpIn, imageBuffer);
+  try {
+    await sidecar.foregroundMask(tmpIn, tmpOut);
+    const png = fs.readFileSync(tmpOut);
+    const { bbox, width, height } = await alphaBbox(png);
+    return { png, bbox, width, height, predictionId: null };
+  } finally {
+    for (const f of [tmpIn, tmpOut]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+  }
+}
+
 /** Torso band of the person bbox — vertical 28–92%, horizontal 8–92%. */
 function torsoRegion(bbox, imgW, imgH) {
   const left = Math.max(0, Math.round(bbox.left + bbox.width * 0.08));
@@ -212,4 +232,4 @@ async function pixelLockWithKnownBoxes(original, generated, alpha, generatedBox,
   return { ok: true, buffer: out };
 }
 
-module.exports = { personAlpha, torsoRegion, cropRegion, brandingPresence, pixelLockWithKnownBoxes };
+module.exports = { personAlpha, personAlphaLocal, torsoRegion, cropRegion, brandingPresence, pixelLockWithKnownBoxes };

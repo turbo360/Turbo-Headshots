@@ -47,7 +47,7 @@ class ShootsStore {
 
   getShoot(id) { return this.shoots.data.find((s) => s.id === id) ?? null; }
 
-  createShoot({ name, client, date, location, galleryId, galleryName, checkinSlug, checkinUrl, galleryShareUrl, serverShootId, defaults }) {
+  createShoot({ name, client, date, location, galleryId, galleryName, checkinSlug, checkinUrl, galleryShareUrl, serverShootId, defaults, engineMode }) {
     const outputFolder = this.settings.raw.outputFolder;
     let folderPath = null;
     if (outputFolder) {
@@ -70,6 +70,7 @@ class ShootsStore {
       status: 'live',
       folderPath,
       defaults: defaults ?? this.settings.raw.defaultDispatchOpts,
+      engineMode: engineMode === 'local' ? 'local' : 'replicate',
       createdAt: nowIso(),
     };
     this.shoots.update((list) => list.push(shoot));

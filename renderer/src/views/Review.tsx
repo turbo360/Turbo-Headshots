@@ -21,7 +21,9 @@ export default function Review() {
   // The person may belong to a non-active (dashboard) shoot — always price
   // and dispatch with THEIR shoot's saved defaults.
   const personShoot = person ? s.shoots.find((x) => x.id === person.shootId) ?? shoot : shoot;
-  const opts = personShoot ? personShoot.defaults : s.dispatchOpts;
+  const opts = personShoot
+    ? { ...personShoot.defaults, engine: personShoot.engineMode ?? 'replicate' }
+    : s.dispatchOpts;
 
   useEffect(() => {
     let live = true;

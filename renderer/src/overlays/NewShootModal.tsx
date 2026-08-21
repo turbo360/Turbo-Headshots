@@ -10,6 +10,7 @@ export default function NewShootModal() {
     galleryMode: 'create' as 'create' | 'link',
     galleryName: '', galleryId: '',
     autoUpload: true,
+    engineMode: 'replicate' as 'replicate' | 'local',
   });
   const [busy, setBusy] = useState(false);
 
@@ -36,6 +37,7 @@ export default function NewShootModal() {
         galleryName: form.galleryName.trim() || form.name.trim(),
         galleryId: form.galleryId || undefined,
         autoUpload: form.autoUpload,
+        engineMode: form.engineMode,
       });
       if (!r.ok) { s.showToast(r.error ?? 'Could not create shoot', 'error'); return; }
       useStore.setState({ newShootOpen: false });
@@ -61,6 +63,22 @@ export default function NewShootModal() {
             onChange={(e) => setForm({ ...form, date: e.target.value })} />
           <Input label="Location" value={form.location}
             onChange={(e) => setForm({ ...form, location: e.target.value })} />
+        </div>
+
+        <div className="kicker" style={{ margin: '20px 0 10px' }}>Processing pipeline</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {([
+            { id: 'replicate' as const, label: 'Replicate', desc: 'All AI stages in the cloud — the proven pipeline.' },
+            { id: 'local' as const, label: 'Local', desc: 'Masks & cutouts on this Mac; only the Nano Banana render (and 8K print) bill.' },
+          ]).map((m) => (
+            <button key={m.id} className={`pick-card${form.engineMode === m.id ? ' on' : ''}`}
+              style={{ flex: 1, padding: form.engineMode === m.id ? 11 : 12 }}
+              onClick={() => setForm({ ...form, engineMode: m.id })}>
+              {form.engineMode === m.id && <span className="on-tag">ON</span>}
+              <span style={{ fontWeight: 700 }}>{m.label}</span>
+              <span className="muted" style={{ fontSize: 12.5, fontWeight: 400 }}>{m.desc}</span>
+            </button>
+          ))}
         </div>
 
         <div className="kicker" style={{ margin: '20px 0 10px' }}>Turbo IQ gallery</div>

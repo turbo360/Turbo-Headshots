@@ -8,7 +8,11 @@ export type BackdropId =
 export type FramingId = 'chest-up' | 'shoulders-up' | 'head-tight' | 'original';
 export type MatteId = 'inspyrenet' | 'birefnet';
 
+export type EngineMode = 'replicate' | 'local';
+
 export interface DispatchOpts {
+  /** Resolved per shoot at dispatch/run time; 'local' = masks on this Mac. */
+  engine?: EngineMode;
   backdrops: BackdropId[];
   framing: FramingId;
   keepClothing: boolean;
@@ -38,6 +42,7 @@ export interface Shoot {
   status: ShootStatus;
   folderPath: string | null;
   defaults: DispatchOpts;
+  engineMode?: EngineMode;
   createdAt: string;
   // Populated by shoots:list
   peopleCount?: number;
@@ -225,7 +230,7 @@ export interface TurboApi {
     create(data: {
       name: string; client: string; date: string; location: string;
       galleryMode: 'create' | 'link'; galleryName?: string; galleryId?: string;
-      autoUpload: boolean;
+      autoUpload: boolean; engineMode?: EngineMode;
     }): Promise<{ ok: boolean; shoot?: Shoot; error?: string }>;
     get(id: string): Promise<{ shoot: Shoot; people: Person[]; batches: Batch[] } | null>;
     setActive(id: string | null): Promise<void>;

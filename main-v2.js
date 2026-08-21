@@ -231,6 +231,7 @@ app.whenReady().then(() => {
       settings.patch({ reviewedFlagMigrated: true });
     }
   });
+  boot('birefnetLocal', () => require('./engine/birefnetLocal').init(app.getPath('userData')));
   boot('importLegacyFolders', () => shoots.importLegacyFolders());
   boot('watcher', () => watcher.start());
   boot('checkin', () => checkin.start());
@@ -241,6 +242,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (sidecar) { sidecar.stop(); sidecar = null; }
+  try { require('./engine/birefnetLocal').stop(); } catch { /* ignore */ }
   app.quit();
 });
 
@@ -265,4 +267,5 @@ app.on('before-quit', (event) => {
   }
   flushAll();
   if (sidecar) { sidecar.stop(); sidecar = null; }
+  try { require('./engine/birefnetLocal').stop(); } catch { /* ignore */ }
 });
