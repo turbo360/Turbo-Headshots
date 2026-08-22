@@ -324,24 +324,49 @@ async function processRender(item, deps, frameCache) {
 
 /* ---------- Fully Local (composite) pipeline ---------- */
 
-// Procedural studio backdrops matching the NBP prompt palette. Deterministic
-// gradients: every subject in a shoot gets EXACTLY the same backdrop.
+// Procedural studio backdrops, palette MEASURED from real Nano Banana Pro
+// renders (2026-08-22, corner/pool sampling across live shoot frames) so a
+// Fully Local backdrop sits in the same family as the cloud look.
+// Deterministic: every subject in a shoot gets EXACTLY the same backdrop.
 const COMPOSITE_BACKDROPS = {
-  grey: { center: '#7e8184', edge: '#63666a' },
-  white: { center: '#f5f5f3', edge: '#e0e0dd' },
-  navy: { center: '#24364d', edge: '#141f31' },
-  turbo: { center: '#2b2725', edge: '#131110' },
+  grey: { center: 'rgb(111,103,108)', edge: 'rgb(93,88,94)' },
+  white: { center: 'rgb(230,228,233)', edge: 'rgb(237,236,241)' },
+  navy: { center: 'rgb(26,35,53)', edge: 'rgb(19,26,43)' },
+  turbo: { center: 'rgb(43,39,37)', edge: 'rgb(19,17,16)' },
 };
 
 function backdropSvg(w, h, c) {
   return Buffer.from(
     `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
-    `<defs><radialGradient id="g" cx="50%" cy="38%" r="80%">` +
+    `<defs><radialGradient id="g" cx="50%" cy="30%" r="85%">` +
     `<stop offset="0%" stop-color="${c.center}"/>` +
+    `<stop offset="55%" stop-color="${c.center}"/>` +
     `<stop offset="100%" stop-color="${c.edge}"/>` +
     `</radialGradient></defs>` +
     `<rect width="100%" height="100%" fill="url(#g)"/></svg>`
   );
+}
+
+/** Soft radial key-light glow + corner vignette, screen/multiply composited
+    over the finished frame — the "studio pool of light" the NBP look has. */
+function lightingSvgs(w, h, faceX, faceY, faceH) {
+  const r = Math.round(Math.max(faceH * 2.4, h * 0.25));
+  const glow = Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
+    `<defs><radialGradient id="k" cx="${(faceX / w * 100).toFixed(1)}%" cy="${(faceY / h * 100).toFixed(1)}%" r="${(r / Math.max(w, h) * 100).toFixed(1)}%">` +
+    `<stop offset="0%" stop-color="rgba(255,252,246,0.10)"/>` +
+    `<stop offset="100%" stop-color="rgba(255,252,246,0)"/>` +
+    `</radialGradient></defs><rect width="100%" height="100%" fill="url(#k)"/></svg>`
+  );
+  const vignette = Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
+    `<defs><radialGradient id="v" cx="50%" cy="42%" r="95%">` +
+    `<stop offset="0%" stop-color="rgba(0,0,0,0)"/>` +
+    `<stop offset="72%" stop-color="rgba(0,0,0,0)"/>` +
+    `<stop offset="100%" stop-color="rgba(0,0,0,0.16)"/>` +
+    `</radialGradient></defs><rect width="100%" height="100%" fill="url(#v)"/></svg>`
+  );
+  return { glow, vignette };
 }
 
 /**
@@ -379,9 +404,41 @@ async function processComposite(item, deps, frameCache) {
         const identity = i === j ? 1 : 0;
         return identity + (v - identity) * wbStrength;
       }));
+
+      // Face-metered exposure: the whole-frame meter is dragged around by the
+      // wall — meter the FACE and lift/tame exposure so skin lands right.
+      const meta0 = await sharp(oriented).metadata();
+      const W0 = meta0.width ?? 0;
+      const H0 = meta0.height ?? 0;
+      let faceGain = 1.0;
+      const faceH = faceData.estimatedFaceHeight || H0 * 0.18;
+      const faceX = faceData.noseTipX ?? W0 / 2;
+      const faceY = faceData.eyeLineY ?? H0 * 0.3;
+      try {
+        const fb = faceData.faceBoundingBox;
+        const rx = fb?.width ? fb.x : faceX - faceH * 0.4;
+        const ry = fb?.width ? fb.y : faceY - faceH * 0.35;
+        const rw = fb?.width ? fb.width : faceH * 0.8;
+        const rh = fb?.width ? fb.height : faceH;
+        const region = {
+          left: Math.max(0, Math.round(rx)),
+          top: Math.max(0, Math.round(ry)),
+          width: Math.max(8, Math.min(W0 - Math.max(0, Math.round(rx)), Math.round(rw))),
+          height: Math.max(8, Math.min(H0 - Math.max(0, Math.round(ry)), Math.round(rh))),
+        };
+        const st = await sharp(oriented).extract(region).stats();
+        const [r, g, b] = st.channels.map((c) => c.mean);
+        const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        faceGain = Math.min(1.32, Math.max(0.92, 128 / luma));
+      } catch { /* keep neutral gain */ }
+      // Gentle warmth folded into the WB matrix — skin under the studio look
+      // reads warmer than the wall-lit capture.
+      const WARMTH = [1.03, 1.0, 0.97];
+      const graded = matrix.map((row, i) => row.map((v) => v * WARMTH[i]));
+
       const corrected = await sharp(oriented)
-        .recomb(matrix)
-        .modulate({ saturation: 1.05, brightness: settings.raw.brightness ?? 1.12 })
+        .recomb(graded)
+        .modulate({ saturation: 1.05, brightness: (settings.raw.brightness ?? 1.12) * faceGain })
         .sharpen({ sigma: settings.raw.sharpening ?? 0.8, m1: 0.5, m2: 0.5 })
         .jpeg({ quality: 98 }).toBuffer();
 
@@ -389,7 +446,11 @@ async function processComposite(item, deps, frameCache) {
       onStage('guardOut', '02 Matte · local BiRefNet / Vision', 35);
       const cutoutPng = await localCutout(corrected, null, false, sidecar, flags);
       const meta = await sharp(corrected).metadata();
-      return { corrected, cutoutPng, faceData, width: meta.width ?? 0, height: meta.height ?? 0 };
+      return {
+        corrected, cutoutPng, faceData,
+        width: meta.width ?? 0, height: meta.height ?? 0,
+        faceX, faceY, faceH,
+      };
     })();
     frameCache.set('compositePrep', prepPromise);
     prepPromise.catch(() => frameCache.delete('compositePrep'));
@@ -400,8 +461,13 @@ async function processComposite(item, deps, frameCache) {
   onStage('export', '03 Composite + export', 65);
   const bg = COMPOSITE_BACKDROPS[backdrop] ?? COMPOSITE_BACKDROPS.grey;
   if (!COMPOSITE_BACKDROPS[backdrop]) flags.push(`backdropFallback:${backdrop}`);
+  const { glow, vignette } = lightingSvgs(prep.width, prep.height, prep.faceX, prep.faceY, prep.faceH);
   const renderBuf = await sharp(backdropSvg(prep.width, prep.height, bg))
-    .composite([{ input: prep.cutoutPng }])
+    .composite([
+      { input: prep.cutoutPng },
+      { input: glow, blend: 'screen' },
+      { input: vignette, blend: 'multiply' },
+    ])
     .jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toBuffer();
 
   const outputs = [];
