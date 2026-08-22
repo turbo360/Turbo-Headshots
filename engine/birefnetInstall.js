@@ -11,24 +11,26 @@ const path = require('path');
 // Kept in lockstep with engine/birefnetLocal.js protocol: strict one JSON
 // request line -> one JSON reply line; no banner output.
 const INFER_SCRIPT = `#!/usr/bin/env python3
-"""Persistent BiRefNet matting worker for Turbo Headshots (local pipeline)."""
+"""Persistent BiRefNet matting worker for Turbo Headshots (local pipeline).
+
+Model: ZhengPeng7/BiRefNet_HR-matting (MIT) — high-res soft-alpha matting,
+chosen 2026-08-22 after a head-to-head on live shoot frames (beat the general
+1024 model, portrait variant, and a ViTMatte two-stage on flyaway hair).
+Aspect-preserving inference at up to 2048px long side.
+"""
 import sys, json
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision import transforms
 from transformers import AutoModelForImageSegmentation
 
 device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-model = AutoModelForImageSegmentation.from_pretrained('ZhengPeng7/BiRefNet', trust_remote_code=True)
+model = AutoModelForImageSegmentation.from_pretrained('ZhengPeng7/BiRefNet_HR-matting', trust_remote_code=True)
 model.to(device).eval()
 if device == 'mps':
     model.half()
 
-tf = transforms.Compose([
-    transforms.Resize((1024, 1024)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-])
+RES = 2048
 
 for line in sys.stdin:
     line = line.strip()
@@ -36,14 +38,22 @@ for line in sys.stdin:
         continue
     try:
         req = json.loads(line)
-        im = Image.open(req['in']).convert('RGB')
+        im = ImageOps.exif_transpose(Image.open(req['in'])).convert('RGB')
         w, h = im.size
+        scale = min(RES / w, RES / h, 1.0)
+        nw = max(32, int(w * scale) // 32 * 32)
+        nh = max(32, int(h * scale) // 32 * 32)
+        tf = transforms.Compose([
+            transforms.Resize((nh, nw)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
         x = tf(im).unsqueeze(0).to(device)
         if device == 'mps':
             x = x.half()
         with torch.no_grad():
             pred = model(x)[-1].sigmoid().float().cpu()
-        mask = transforms.ToPILImage()(pred[0].squeeze()).resize((w, h), Image.BILINEAR)
+        mask = transforms.ToPILImage()(pred[0].squeeze()).resize((w, h), Image.LANCZOS)
         out = im.convert('RGBA')
         out.putalpha(mask)
         out.save(req['out'])
@@ -111,7 +121,28 @@ async function install(userDataDir, onProgress) {
     fs.writeFileSync(path.join(dir, 'birefnet_infer.py'), INFER_SCRIPT);
     step('Verifying…');
     await sh(path.join(dir, 'venv', 'bin', 'python3'), ['-c', 'import torch, transformers, timm']);
-    step('Done — the model weights (~900 MB) download automatically on first use.');
+    step('Downloading model weights (~900 MB) and warming up — several minutes, one time only…');
+    const tmpImg = path.join(dir, 'warmup.jpg');
+    const tmpOut = path.join(dir, 'warmup.png');
+    await sh(path.join(dir, 'venv', 'bin', 'python3'),
+      ['-c', `from PIL import Image; Image.new('RGB',(256,256),(120,120,120)).save(${JSON.stringify(tmpImg)})`]);
+    await new Promise((resolve, reject) => {
+      const p = spawn(path.join(dir, 'venv', 'bin', 'python3'), [path.join(dir, 'birefnet_infer.py')],
+        { stdio: ['pipe', 'pipe', 'pipe'] });
+      const timer = setTimeout(() => { try { p.kill(); } catch { /* ignore */ } reject(new Error('warmup timed out')); }, 15 * 60 * 1000);
+      p.stderr.on('data', (d) => step(String(d).trim().slice(0, 140)));
+      p.stdout.once('data', (d) => {
+        clearTimeout(timer);
+        let ok = false;
+        try { ok = JSON.parse(String(d).split('\n')[0]).ok; } catch { /* fall through */ }
+        try { p.kill(); } catch { /* ignore */ }
+        ok ? resolve() : reject(new Error('warmup matte failed'));
+      });
+      p.on('error', reject);
+      p.stdin.write(`${JSON.stringify({ in: tmpImg, out: tmpOut })}\n`);
+    });
+    for (const f of [tmpImg, tmpOut]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+    step('Done — local BiRefNet ready.');
     return { ok: true };
   })().catch((err) => ({ ok: false, error: err.message }));
 

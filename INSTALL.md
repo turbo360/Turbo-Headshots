@@ -50,7 +50,7 @@ hair edges (the same model the cloud pipeline uses).
 **One-click (preferred):** Settings → Look & engine → **Local AI runtime →
 Install local BiRefNet**. The app finds Python, builds a private
 environment under its own data folder, and downloads ~2 GB of
-dependencies. Model weights (~900 MB) download automatically on first use.
+dependencies, then pre-downloads the model weights (~900 MB) and warms the model up so the first shoot frame is instant.
 
 **Prerequisite:** Python 3.10+ available at `/opt/homebrew/bin/python3`.
 If the installer reports no Python: install [Homebrew](https://brew.sh),
